@@ -3479,6 +3479,9 @@
 	// of the enum for the pipe. We take it from there instead of the hardcoded 23; the old path (first pipe in the world)
 	// remains as a fallback, because it only works when pipes are already on the map.
 	function isPipeType(state, t) {
+		// 0.6.0: the game's own segment test covers every pipe network (water, gas, modded)
+		const API = ST._pipeApi;
+		if (state && API && typeof API.isSegment === "function") { try { return !!API.isSegment(state, t); } catch (e) { swallow("isPipeType", e); } }
 		try {
 			// isPipe/isPipeType run in loops over all structures, so when there is no answer
 			// we retry the query at most once per second, not on every block
@@ -3633,6 +3636,7 @@
 		const d = (q && q.data) || {};
 		return {
 			x: q.x, y: q.y,
+			type: q.type,     // 0.6.0 restoreSnapshots defaults a missing type to the water pipe (gas pipes!)
 			data: {
 				pipeConnectionMask: d.pipeConnectionMask || 0,
 				pipeBridgeConnectionMask: d.pipeBridgeConnectionMask || 0,
@@ -3715,7 +3719,7 @@
 				P.restoreSnapshots = function (state, snaps) {
 					if (isClientSync() && ST.wsx.paused && !ST._applyingNet) {
 						try {
-							const lista = (snaps || []).map((q) => ({ x: q.x, y: q.y, data: q.data }));
+							const lista = (snaps || []).map((q) => ({ x: q.x, y: q.y, type: q.type, data: q.data }));   // type: gas pipes (0.6.0)
 							if (lista.length) { net.send({ t: "act", k: "pipeRestore", s: lista }); stampAct("placeN", lista.length); }
 							if (lim("pipeRestTx", 200, 600000)) log("CLIENT pipe undo -> host: restore " + lista.length);
 						} catch (e) { swallow("pipe undo", e); }
@@ -3855,6 +3859,8 @@
 				} catch (e) { swallow("drag probe", e); }
 			} catch (e) { swallow("pipe drag history", e); }
 			const m = { t: "act", k: "pipeRun", s: { x: start.x, y: start.y }, e: { x: end.x, y: end.y } };
+			const ty = positions && positions[0] && positions[0].structureType;   // 0.6.0: gas pipes
+			if (ty != null) m.ty = ty;
 			if (ST._placeQ) { (ST._pipeRunQ || (ST._pipeRunQ = [])).push(m); }   // there are pipes in the queue — wait for them
 			else net.send(m);                                                    // the drag itself over existing pipes
 			if (lim("pipeRunTx", 30)) log("CLIENT pipe drag -> host: (" + start.x + "," + start.y + ") -> ("
@@ -3940,7 +3946,7 @@
 	// each other could get glued together) and the closing of two-cell gaps.
 	// We don't transmit the route: cZ walks a straight line from start to end in grid steps anyway
 	// (function V in the game's code), so the host only needs two points and replays it without loss.
-	function pipeRunHost(state, poczatek, koniec) {
+	function pipeRunHost(state, poczatek, koniec, typ) {
 		// EVERY exit says why. The 0.9.250 regression survived the entire test precisely because these
 		// exits were silent: the log showed the client's send and nothing on the host's side.
 		const nie = (powod) => { if (lim("pdRunNie:" + powod, 5)) log("HOST: pipe drag skipped — " + powod); return 0; };
@@ -3960,6 +3966,13 @@
 		const naTrasie = [];
 		for (const punkt of trasa) { const q = pipeAt(state, punkt.x, punkt.y); if (q) naTrasie.push(q); }
 		if (!naTrasie.length) return nie("na trasie nie ma ani jednej rury (" + (kroki + 1) + " punktow) — paczka rur jeszcze nie doszla?");
+		// 0.6.0: the route planner takes the pipe type from the points and assumes the water pipe otherwise,
+		// which blocks gas pipe endpoints. Type from the client, else from the pipe at the start of the route.
+		if (typ == null || (typeof API.isSegment === "function" && !isPipeType(state, typ))) {
+			const q0 = pipeAt(state, poczatek.x, poczatek.y);
+			typ = q0 ? q0.type : undefined;
+		}
+		if (typ != null) for (const punkt of trasa) punkt.structureType = typ;
 		let wynik = null, role = "";
 		try {
 			API.path(state, trasa, poczatek, koniec);              // point roles according to the HOST'S WORLD
@@ -6489,7 +6502,7 @@
 				// client pipe drag — we replay it with the game's functions AFTER the placeN batch
 				// has placed the pipes themselves (the channel is ordered, so they're already here)
 				ST._applyingNet = true;
-				try { pipeRunHost(state, msg.s, msg.e); } finally { ST._applyingNet = false; }
+				try { pipeRunHost(state, msg.s, msg.e, msg.ty); } finally { ST._applyingNet = false; }
 			} else if (msg.k === "pd") {
 				// client pipe connections: we apply them locally, and our own watcher broadcasts them further
 				ST._applyingNet = true;
