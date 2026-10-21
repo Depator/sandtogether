@@ -4929,7 +4929,7 @@
 				// must go through _entDrop (sprite+light), because swapping the reference does NOT clean up the renderer.
 				try {
 					if (ST._entDrop && ST.FH && ST.FH.entities && ST.FH.entities.getAll) {
-						const oldList = ST.FH.entities.getAll(state) || [];
+						const oldList = (ST.FH.entities.getAll(state) || []).slice(); // copy: _entDrop splices the live list
 						let newIds = null;
 						for (const k2 in (msg.st || {})) { const v2 = msg.st[k2]; if (v2 && Array.isArray(v2.list)) { newIds = new Set(v2.list.map((c5) => c5 && c5.id)); break; } }
 						if (newIds) for (const c6 of oldList) { if (c6 && c6.id >= 0 && !newIds.has(c6.id)) { if (ST._entCollectFx) { try { ST._entCollectFx(state, c6); } catch (e2) {} } try { ST._entDrop(c6); } catch (e2) {} } }
@@ -4942,7 +4942,7 @@
 				// we clear lightIndex (light+sprite will be assigned to them by _entInit from the fast bus).
 				try {
 					const EN9 = ST.FH && ST.FH.entities;
-					const oldL9 = EN9 && EN9.getAll ? (EN9.getAll(state) || []) : [];
+					const oldL9 = EN9 && EN9.getAll ? (EN9.getAll(state) || []).slice() : []; // copy: _entDrop splices the live list
 					const oldBy9 = new Map(oldL9.map((c9) => [c9 && c9.id, c9]));
 					for (const k9 in (msg.st || {})) {
 						const v9 = msg.st[k9];
@@ -6652,8 +6652,9 @@
 						state.store.conservatory.tickets += Math.pow(2, types);
 					}
 					try { ST.FH.events.emit(state, "entity:collected", { typeId: msg.ty }); } catch (e) { swallow("act:" + msg.k, e); }
-					// remove the entity from the host's map (no official remove — emulated: splice from the LIVE getAll list
-					// + hide the sprite via getSprite + turn off the light). Without this the critter hung around until the 2nd collection.
+					// remove the entity from the host's map via _entDrop (full removal incl. the 0.6.0 id cache and pet overlay);
+					// fallback emulation: splice from the LIVE getAll list + hide the sprite + turn off the light.
+					// Without this the critter hung around until the 2nd collection.
 					try {
 						const EN = ST.FH.entities;
 						if (msg.eid != null && EN && EN.getAll) {
@@ -6661,9 +6662,13 @@
 							const idxE = listE.findIndex((en) => en && en.id === msg.eid);
 							if (idxE >= 0) {
 								const en = listE[idxE];
-								try { if (en.lightIndex !== undefined && ST.FH.effects && ST.FH.effects.removeLight) { ST.FH.effects.removeLight(state, en.lightIndex); en.lightIndex = undefined; } } catch (e) { swallow("act:" + msg.k, e); }
-								try { const spr = EN.getSprite && EN.getSprite(state, en.id); if (spr) { spr.renderable = false; spr.visible = false; } } catch (e) { swallow("act:" + msg.k, e); }
-								listE.splice(idxE, 1);
+								let dropped = false;
+								if (ST._entDrop) { try { ST._entDrop(en); dropped = true; } catch (e) { swallow("act:" + msg.k, e); } }
+								if (!dropped) {
+									try { if (en.lightIndex !== undefined && ST.FH.effects && ST.FH.effects.removeLight) { ST.FH.effects.removeLight(state, en.lightIndex); en.lightIndex = undefined; } } catch (e) { swallow("act:" + msg.k, e); }
+									try { const spr = EN.getSprite && EN.getSprite(state, en.id); if (spr) { spr.renderable = false; spr.visible = false; } } catch (e) { swallow("act:" + msg.k, e); }
+									const i2 = listE.indexOf(en); if (i2 >= 0) listE.splice(i2, 1);
+								}
 							}
 						}
 					} catch (e) { swallow("act:" + msg.k, e); }
@@ -8981,7 +8986,8 @@
 							if (q3[5] && ST._drawBridge) {
 								try {
 									ctx.save(); ctx.globalAlpha = 0.75;
-									ST._drawBridge(state, gx, gy, q3[5] === 1 ? "horizontal" : "vertical", { ctx: ctx });
+									// segmentStructureType: 0.6.0 needs it for bridges not built yet (otherwise draws nothing)
+									ST._drawBridge(state, gx, gy, q3[5] === 1 ? "horizontal" : "vertical", { ctx: ctx, segmentStructureType: q3[2] });
 									ctx.restore(); drawn = true;
 								} catch (e) { ST._drawBridge = null; try { ctx.restore(); } catch (e2) {} }
 							}
