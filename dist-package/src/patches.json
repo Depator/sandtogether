@@ -10,6 +10,7 @@
 	],
 	"bundle": [
 		{
+			"id": "frame",
 			"name": "frame hook (state+FH capture)",
 			"critical": true,
 			"variants": [
@@ -25,6 +26,7 @@
 			]
 		},
 		{
+			"id": "dig",
 			"name": "dig hook (DN)",
 			"variants": [
 				{
@@ -52,6 +54,7 @@
 			]
 		},
 		{
+			"id": "setCell",
 			"name": "setCell hook (Gz)",
 			"variants": [
 				{
@@ -87,6 +90,7 @@
 			]
 		},
 		{
+			"id": "place",
 			"name": "building place hook (_place)",
 			"variants": [
 				{
@@ -122,6 +126,7 @@
 			]
 		},
 		{
+			"id": "drone",
 			"name": "drone deploy hook (_drone)",
 			"critical": false,
 			"variants": [
@@ -140,6 +145,7 @@
 			]
 		},
 		{
+			"id": "proj",
 			"name": "projectile fire hook (_proj)",
 			"critical": false,
 			"variants": [
@@ -155,6 +161,7 @@
 			]
 		},
 		{
+			"id": "grab",
 			"name": "grabber host-side hook (_grab)",
 			"critical": false,
 			"variants": [
@@ -187,6 +194,7 @@
 			]
 		},
 		{
+			"id": "vac",
 			"name": "vacuum hook (j)",
 			"variants": [
 				{
@@ -222,6 +230,7 @@
 			]
 		},
 		{
+			"id": "playerDig",
 			"name": "player-dig flag (I)",
 			"variants": [
 				{
@@ -253,6 +262,7 @@
 			]
 		},
 		{
+			"id": "projCtx",
 			"name": "projectile-update flag (m)",
 			"variants": [
 				{
@@ -284,6 +294,7 @@
 			]
 		},
 		{
+			"id": "spray",
 			"name": "spray flag (_)",
 			"variants": [
 				{
@@ -315,6 +326,7 @@
 			]
 		},
 		{
+			"id": "fire",
 			"name": "flamethrower fire hook (A)",
 			"critical": false,
 			"variants": [
@@ -343,6 +355,7 @@
 			]
 		},
 		{
+			"id": "cryo",
 			"name": "cryoblaster freeze hook",
 			"critical": false,
 			"variants": [
@@ -367,6 +380,7 @@
 			]
 		},
 		{
+			"id": "demol",
 			"name": "demolisher area hook (_demol)",
 			"critical": false,
 			"variants": [
@@ -399,6 +413,7 @@
 			]
 		},
 		{
+			"id": "shakeRes",
 			"name": "grabber shake residue hook (_shakeRes)",
 			"critical": false,
 			"variants": [
@@ -427,6 +442,7 @@
 			]
 		},
 		{
+			"id": "volc",
 			"name": "volcanizer lava hook (_volc)",
 			"critical": false,
 			"variants": [
@@ -455,6 +471,7 @@
 			]
 		},
 		{
+			"id": "caulk",
 			"name": "caulkBlaster spray hook (_caulk)",
 			"critical": false,
 			"variants": [
@@ -487,6 +504,7 @@
 			]
 		},
 		{
+			"id": "caulkRm",
 			"name": "caulkBlaster remove hook (_caulkRm)",
 			"critical": false,
 			"variants": [
@@ -515,6 +533,7 @@
 			]
 		},
 		{
+			"id": "demolExports",
 			"name": "demolish module exports (pipeZn/areaL)",
 			"critical": false,
 			"variants": [
@@ -543,6 +562,7 @@
 			]
 		},
 		{
+			"id": "techMod",
 			"name": "tech module export (_techMod)",
 			"critical": false,
 			"variants": [
@@ -567,6 +587,7 @@
 			]
 		},
 		{
+			"id": "achievements",
 			"name": "achievements with mods",
 			"variants": [
 				{
@@ -585,6 +606,7 @@
 			]
 		},
 		{
+			"id": "dropLu",
 			"name": "mutation-queue drop (Lu)",
 			"variants": [
 				{
@@ -616,6 +638,7 @@
 			]
 		},
 		{
+			"id": "vacRel",
 			"name": "vacuum release hook (_vacRel)",
 			"critical": false,
 			"variants": [
@@ -644,6 +667,7 @@
 			]
 		},
 		{
+			"id": "capTarget",
 			"name": "corraller capture target (__capX)",
 			"critical": false,
 			"variants": [
@@ -676,6 +700,7 @@
 			]
 		},
 		{
+			"id": "entInit",
 			"name": "entities single-init export (_entInit)",
 			"critical": false,
 			"variants": [
@@ -704,6 +729,7 @@
 			]
 		},
 		{
+			"id": "entNoSpawn",
 			"name": "entities spawn gate (_entNoSpawn)",
 			"critical": false,
 			"variants": [
@@ -732,60 +758,7 @@
 			]
 		},
 		{
-			"name": "corraller release diag (call/noAvail)",
-			"critical": false,
-			"variants": [
-				{
-					"anchor": "const r=t[n];if(!r||r.available<=0)return!1;const o=wt.A.getGunArmAxis(e.store.player)",
-					"patched": "const r=t[n];window.SandTogether&&(SandTogether._rlCall=(SandTogether._rlCall||0)+1);if(!r||r.available<=0){window.SandTogether&&(SandTogether._rlNoAvail=(SandTogether._rlNoAvail||0)+1);return!1}const o=wt.A.getGunArmAxis(e.store.player)",
-					"note": "game 0.6.0 (Update #5, 2026-10-21)"
-				},
-				{
-					"anchor": "const r=t[n];if(!r||r.available<=0)return!1;const o=xt.A.getGunArmAxis(e.store.player)",
-					"patched": "const r=t[n];window.SandTogether&&(SandTogether._rlCall=(SandTogether._rlCall||0)+1);if(!r||r.available<=0){window.SandTogether&&(SandTogether._rlNoAvail=(SandTogether._rlNoAvail||0)+1);return!1}const o=xt.A.getGunArmAxis(e.store.player)"
-				},
-				{
-					"anchor": "const r=t[n];if(!r||r.available<=0)return!1;const o=vt.A.getGunArmAxis(e.store.player)",
-					"patched": "const r=t[n];window.SandTogether&&(SandTogether._rlCall=(SandTogether._rlCall||0)+1);if(!r||r.available<=0){window.SandTogether&&(SandTogether._rlNoAvail=(SandTogether._rlNoAvail||0)+1);return!1}const o=vt.A.getGunArmAxis(e.store.player)",
-					"note": "game 0.5.5 (build 30.08.2026, alias se)"
-				},
-				{
-					"anchor": "const a=t[n];if(!a||a.available<=0)return!1;const r=vt.A.getGunArmAxis(e.store.player)",
-					"patched": "const a=t[n];window.SandTogether&&(SandTogether._rlCall=(SandTogether._rlCall||0)+1);if(!a||a.available<=0){window.SandTogether&&(SandTogether._rlNoAvail=(SandTogether._rlNoAvail||0)+1);return!1}const r=vt.A.getGunArmAxis(e.store.player)"
-				}
-			]
-		},
-		{
-			"name": "corraller release diag (noSpot)",
-			"critical": false,
-			"variants": [
-				{
-					"anchor": "if(!d)return!1;const u=se.FH.entities;",
-					"patched": "if(!d){window.SandTogether&&(SandTogether._rlNoSpot=(SandTogether._rlNoSpot||0)+1);return!1}const u=se.FH.entities;",
-					"note": "game 0.5.5 (build 30.08.2026, alias se)"
-				},
-				{
-					"anchor": "if(!d)return!1;const u=ie.FH.entities;",
-					"patched": "if(!d){window.SandTogether&&(SandTogether._rlNoSpot=(SandTogether._rlNoSpot||0)+1);return!1}const u=ie.FH.entities;"
-				}
-			]
-		},
-		{
-			"name": "corraller release diag (spawnNull/ok)",
-			"critical": false,
-			"variants": [
-				{
-					"anchor": "const f=u.spawn(e,n,s,l);if(!f)return!1;f.playerReleased=!0,r.available--",
-					"patched": "const f=u.spawn(e,n,s,l);if(!f){window.SandTogether&&(SandTogether._rlSpawnNull=(SandTogether._rlSpawnNull||0)+1);return!1}window.SandTogether&&(SandTogether._rlOk=(SandTogether._rlOk||0)+1);f.playerReleased=!0,r.available--",
-					"note": "game 0.5.5 (build 30.08.2026, alias se)"
-				},
-				{
-					"anchor": "const f=u.spawn(e,n,i,l);if(!f)return!1;f.playerReleased=!0,a.available--",
-					"patched": "const f=u.spawn(e,n,i,l);if(!f){window.SandTogether&&(SandTogether._rlSpawnNull=(SandTogether._rlSpawnNull||0)+1);return!1}window.SandTogether&&(SandTogether._rlOk=(SandTogether._rlOk||0)+1);f.playerReleased=!0,a.available--"
-				}
-			]
-		},
-		{
+			"id": "undo",
 			"name": "undo module export (_undoState)",
 			"variants": [
 				{
@@ -804,6 +777,7 @@
 			]
 		},
 		{
+			"id": "bpBulk",
 			"name": "build preview export (_bpPos/_drawStruct)",
 			"variants": [
 				{
@@ -818,6 +792,7 @@
 			]
 		},
 		{
+			"id": "bpSingle",
 			"name": "build preview export - single place (_bpPos/_drawStruct)",
 			"variants": [
 				{
@@ -836,6 +811,7 @@
 			]
 		},
 		{
+			"id": "bpArrow",
 			"name": "build direction arrow export (_bpArw)",
 			"variants": [
 				{
@@ -854,6 +830,7 @@
 			]
 		},
 		{
+			"id": "bpSelect",
 			"name": "select/copy preview export (_bpPos)",
 			"variants": [
 				{
@@ -872,6 +849,7 @@
 			]
 		},
 		{
+			"id": "bpMarquee",
 			"name": "selection marquee export (_bpSelRect)",
 			"variants": [
 				{
@@ -890,6 +868,7 @@
 			]
 		},
 		{
+			"id": "movePreviewQ",
 			"name": "move preview queue export (_movePreviewQ)",
 			"critical": false,
 			"variants": [
@@ -905,6 +884,7 @@
 			]
 		},
 		{
+			"id": "flameLight",
 			"name": "flame burn light export (_flame)",
 			"critical": false,
 			"variants": [
@@ -920,6 +900,7 @@
 			]
 		},
 		{
+			"id": "projSprite",
 			"name": "projectile sprite api export (_sprAdd)",
 			"critical": false,
 			"variants": [
@@ -935,6 +916,7 @@
 			]
 		},
 		{
+			"id": "simLight",
 			"name": "simulation light export (_addLight)",
 			"critical": false,
 			"variants": [
@@ -950,6 +932,7 @@
 			]
 		},
 		{
+			"id": "pipeApi",
 			"name": "pipe api export (_pipeApi)",
 			"critical": false,
 			"variants": [
@@ -965,6 +948,7 @@
 			]
 		},
 		{
+			"id": "pipeRun",
 			"name": "pipe drag run export (_pipeRun)",
 			"critical": false,
 			"variants": [
@@ -980,6 +964,7 @@
 			]
 		},
 		{
+			"id": "delSel",
 			"name": "selection delete hook (_delSel)",
 			"critical": false,
 			"variants": [
