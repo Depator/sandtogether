@@ -77,7 +77,7 @@
 			lb_title: "MULTIPLAYER", lb_sub: "SandTogether co-op — up to 4 players",
 			lb_host_steam_d: "Play over the internet — invite friends from your Steam friend list",
 			lb_host_lan_d: "Local network or VPN (Tailscale, Radmin...)",
-			lb_join_lan_d: "Paste the address your friend gave you — works for an internet host, a LAN or a VPN",
+			lb_join_lan_d: "Paste the address your friend gave you (ip:port/code) — works for an internet host, a LAN or a VPN",
 			lb_join_id_d: "Join with a Lobby ID copied to the clipboard",
 			lb_close: "✕", lb_disconnect: "Disconnect", lb_players: "Players", lb_you: "you",
 			lb_id: "Lobby ID", lb_copy: "copy", lb_copied: "copied!", lb_invite: "Invite a friend",
@@ -143,7 +143,7 @@
 			lb_title: "MULTIPLAYER", lb_sub: "SandTogether co-op — do 4 graczy",
 			lb_host_steam_d: "Graj przez internet — zaproś znajomych z listy Steam",
 			lb_host_lan_d: "Sieć lokalna albo VPN (Tailscale, Radmin...)",
-			lb_join_lan_d: "Wklej adres, który dostałeś od kolegi — działa dla hosta z internetu, LAN i VPN",
+			lb_join_lan_d: "Wklej adres, który dostałeś od kolegi (ip:port/kod) — działa dla hosta z internetu, LAN i VPN",
 			lb_join_id_d: "Dołącz po Lobby ID skopiowanym do schowka",
 			lb_close: "✕", lb_disconnect: "Rozłącz", lb_players: "Gracze", lb_you: "ty",
 			lb_id: "Lobby ID", lb_copy: "kopiuj", lb_copied: "skopiowane!", lb_invite: "Zaproś znajomego",
@@ -209,7 +209,7 @@
 			lb_title: "多人游戏", lb_sub: "SandTogether 合作模式——最多4名玩家",
 			lb_host_steam_d: "通过互联网游玩——从Steam好友列表邀请朋友",
 			lb_host_lan_d: "局域网或VPN(Tailscale、Radmin等)",
-			lb_join_lan_d: "粘贴好友给你的地址 — 互联网房主、局域网和 VPN 均可",
+			lb_join_lan_d: "粘贴好友给你的地址 (ip:port/code) — 互联网房主、局域网和 VPN 均可",
 			lb_join_id_d: "使用复制到剪贴板的房间ID加入",
 			lb_close: "✕", lb_disconnect: "断开连接", lb_players: "玩家", lb_you: "你",
 			lb_id: "房间ID", lb_copy: "复制", lb_copied: "已复制!", lb_invite: "邀请朋友",
@@ -939,6 +939,20 @@
 		} catch (e) {}
 	};
 
+	// LAN/direct hosting: the join address carries the host's session code, "ip:port/code"
+	function rememberJoin(r) {
+		if (!r) return;
+		ST._joinCode = r.code || null; ST._lanAddr = r.lanIp || null; ST._directPort = r.port || 27777;
+	}
+	const joinAddr = (ip) => (ip || "?") + ":" + (ST._directPort || 27777) + (ST._joinCode ? "/" + ST._joinCode : "");
+	// "ip", "ip:port" or "ip:port/code"
+	function splitJoinAddr(text) {
+		let h = String(text || "").trim(), port = null, code = null;
+		const sl = h.indexOf("/"); if (sl >= 0) { code = h.slice(sl + 1).trim() || null; h = h.slice(0, sl); }
+		const c = h.indexOf(":"); if (c >= 0) { port = h.slice(c + 1).trim() || null; h = h.slice(0, c); }
+		return { h: h.trim(), port, code };
+	}
+
 	const isClientSync = () => ST.net.role === "client" && ST.state;
 	const isHostSync = () => ST.net.role === "host" && ST.state && ST.peers.size > 0;
 
@@ -947,7 +961,8 @@
 			log("net event:", ev.kind, JSON.stringify(ev).slice(0, 150));
 			if (ev.kind === "hosting") {
 				ST.net.role = "host"; ST.net.transport = ev.transport;
-				setStatus(ev.transport === "steam" ? t("hosting_steam") : (ST._directMode ? t("direct_ready") : t("hosting_lan", ev.port)));
+				if (ev.transport === "steam") { ST._joinCode = null; ST._lanAddr = null; ST._directAddr = null; }
+				setStatus(ev.transport === "steam" ? t("hosting_steam") : (ST._directMode ? t("direct_ready") : t("hosting_lan", ev.port) + (ST._joinCode ? " — " + joinAddr(ST._lanAddr) : "")));
 				ST.net.lobbyId = ev.lobbyId || null; ST._autoSentWid = null; // reset auto-send; remember lobbyId
 				resetWorldQueue(); // new host session starts clean, peer-connected re-queues the full world
 					updateLobbyIdDisplay();
@@ -961,7 +976,7 @@
 				// Transport label on the client: public address = "Internet", private/VPN = "LAN". Previously it always
 				// came out as "LAN" and players thought the mod was switching them somewhere (Shadow City Empire, 24.08.2026).
 				ST._directMode = ev.transport === "ws" && !isLocalAddr(ev.host);
-				ST._directAddr = null; autoLoadClear(); // new client session = fresh auto-load guard (0.9.72)
+				ST._directAddr = null; ST._lanAddr = null; ST._joinCode = null; autoLoadClear(); // new client session = fresh auto-load guard (0.9.72)
 				ST._gotHostWorld = false; // CRITICAL: world trust does NOT carry over between sessions (different host = different world; without a reset the mirror would overwrite the wrong world)
 				ST._fireQ = []; ST._cryoQ = []; ST._grabbedCells.clear(); ST._placedCells.clear(); ST._volcQ = []; ST._caulkQ = []; ST._caulkRmQ = []; ST._shakeQ = []; if (ST._projSent) ST._projSent.clear(); // state from the previous session = different coordinates/world
 				// own nick (localStorage) broadcast via the existing hello protocol — no changes to the IPC bridge
@@ -1040,7 +1055,7 @@
 				// straight back, and without this the return looks exactly like a stranger arriving.
 				if (!ST._ostatnioZnikl) ST._ostatnioZnikl = new Map();
 				ST._ostatnioZnikl.set(ev.id, performance.now());
-				ST._greeted.delete(ev.id); ST.peers.delete(ev.id); removePeerPuppet(ev.id);
+				ST._greeted.delete(ev.id); ST.peers.delete(ev.id); removePeerPuppet(ev.id); if (ST._rxBucket) ST._rxBucket.delete(ev.id);
 				setStatus(t("player_left", ST.peers.size + 1), "#fa5");
 				// THE CLIENT STAYS PAUSED — a silent unpause created a forked world (the player "kept playing"
 				// locally without knowing everything would be lost on the next join). Want to play solo → Stop.
@@ -1048,6 +1063,7 @@
 				if (ST.state) profileSave(ST.state); // przed resetem roli (isClientSync jeszcze true)
 				autoLoadClear();
 				ST._greeted.clear(); ST.net.role = "idle"; ST.peers.clear(); removeAllPeerPuppets(); setStatus(t("offline"), "#aaa"); showInviteButton(false); ST.net.lobbyId = null; updateLobbyIdDisplay(); updatePingDisplay();
+				ST._joinCode = null; ST._lanAddr = null; ST._directAddr = null;
 				ST._fireQ = []; ST._cryoQ = []; ST._grabbedCells.clear(); ST._placedCells.clear(); ST._volcQ = []; ST._caulkQ = []; ST._caulkRmQ = []; ST._shakeQ = [];
 				ST._gotHostWorld = false;
 				ST._lastAppliedSq = null; // drop the ack so it cannot throttle the next session
@@ -1076,6 +1092,7 @@
 			try { ST._nickCustom = localStorage.getItem("st_nick") || null; } catch (e) { ST._nickCustom = null; }
 			ST._myNick = ST._nickCustom || s.myNick || null; // own nick > Steam nick > default (feedback from TCentraL: LAN = "Player" permanently)
 			ST._gameFp = s.gameFp || null; // game build fingerprint (guard against different builds between players)
+			if (s.join) { rememberJoin(s.join); if (s.join.direct) { ST._directMode = true; ST._directAddr = s.join.publicIp || null; } }
 			for (const p of s.peers) { const old = ST.peers.get(p.id); ST.peers.set(p.id, Object.assign({ x: 0, y: 0, tx: 0, ty: 0 }, old || {}, { nick: p.nick, lastSeen: performance.now() })); } // 0.9.82: keep the modVer/ping of a peer we already know
 			// 0.9.76 HANDSHAKE: the renderer came up (game start OR a reload after loading a world).
 			// The connection lives in the main process, so the host does NOT know we lost the entire session state —
@@ -1123,8 +1140,14 @@
 			net.send({ t: "diag", m: String(txt).slice(0, 300) });
 		} catch (e) {}
 	}
+	// what the host's main process relays between clients (st-main.js handleIncoming)
+	const RELAYED = { pos: 1, hello: 1, chat: 1, myproj: 1, snd: 1 };
 	function handleMsg(from, msg) {
-		if (msg.t === "relay") { handleMsg(msg.from, msg.msg); return; }
+		if (msg.t === "relay") {
+			// only the host relays, and only these types: a client cannot pose as another player
+			if (ST.net.role === "client" && typeof msg.from === "string" && msg.msg && RELAYED[msg.msg.t] === 1) handleMsg(msg.from, msg.msg);
+			return;
+		}
 		// ST-FIX: peer ALIVE marker on any message (pong goes out every 1 s regardless of frames).
 		// lastSeen only updates on "pos", which goes still when the player is sitting in the menu — not fit for a timeout.
 		try { const _pk = ST.peers.get(from); if (_pk) _pk.lastNet = performance.now(); } catch (e) {}
@@ -1442,7 +1465,7 @@
 				}
 			}
 		} else if (msg.t === "act") {
-			if (ST.net.role === "host") replayAction(msg, from);
+			if (ST.net.role === "host" && clientMsgAllowed(from, msg.t)) replayAction(msg, from);
 		} else if (msg.t === "st") {
 			if (ST.net.role === "client") applyNetStructs(msg);
 		} else if (msg.t === "snap") {
@@ -1471,7 +1494,7 @@
 				log("tech-nak from host:", msg.id, "— reverting local flag");
 			}
 		} else if (msg.t === "resDelta") {
-			if (ST.net.role === "host") applyResourceDelta(msg);
+			if (ST.net.role === "host" && clientMsgAllowed(from, msg.t)) applyResourceDelta(msg);
 		} else if (msg.t === "ent") {
 			if (ST.net.role === "client") {
 				applyEntities(msg);
@@ -5153,8 +5176,17 @@
 	}
 	function applyResourceDelta(msg) {
 		const state = ST.state;
-		if (!state || !msg.r) return;
-		try { const res = state.store.resources || (state.store.resources = {}); for (const k of Object.keys(msg.r)) res[k] = (res[k] || 0) + msg.r[k]; } catch (e) {}
+		if (!state || !msg.r || typeof msg.r !== "object") return;
+		try {
+			const res = state.store.resources || (state.store.resources = {});
+			for (const k of Object.keys(msg.r)) {
+				// only counters the host already has (gold, fluxite, energy...), only gains, at most max(1e6, balance) per report
+				const v = msg.r[k];
+				if (!Object.prototype.hasOwnProperty.call(res, k) || typeof res[k] !== "number") continue;
+				if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) continue;
+				res[k] += Math.min(v, Math.max(1e6, Math.abs(res[k])));
+			}
+		} catch (e) {}
 	}
 
 	// 0.9.238 (REPORT: "a projectile on the other player's side is a yellow pixel, without light"): the whole time
@@ -6416,11 +6448,52 @@
 		return built;
 	}
 
+	// HOST: per-client token bucket for act/resDelta. Generous (normal play stays far below it); excess is dropped and logged.
+	const CLIENT_MSG_RATE = 600, CLIENT_MSG_BURST = 2000;
+	function clientMsgAllowed(from, kind) {
+		const now = performance.now();
+		if (!ST._rxBucket) ST._rxBucket = new Map();
+		let b = ST._rxBucket.get(from);
+		if (!b) { b = { tok: CLIENT_MSG_BURST, t: now }; ST._rxBucket.set(from, b); }
+		b.tok = Math.min(CLIENT_MSG_BURST, b.tok + (now - b.t) * CLIENT_MSG_RATE / 1000); b.t = now;
+		if (b.tok >= 1) { b.tok -= 1; return true; }
+		if (lim("rxRate:" + from, 3, 60000)) log("HOST: dropping " + kind + " from " + from + " — over " + CLIENT_MSG_RATE + " msgs/s");
+		return false;
+	}
+	// HOST: a client dig must stay within the game's own excavation limits (Sandkit validator: square side 1..129,
+	// power and drill damage clamped to 1000) and the known options. forceRemoveAll is never used by a player tool.
+	function digMsgOk(state, msg) {
+		const fin = (v) => typeof v === "number" && Number.isFinite(v);
+		if (!fin(msg.x) || !fin(msg.y)) return false;
+		try { const { W, H } = worldBuffers(state); if (W && (msg.x < -256 || msg.y < -256 || msg.x > W + 256 || msg.y > H + 256)) return false; } catch (e) {}
+		const m = msg.m;
+		if (!Array.isArray(m) || m.length < 1 || m.length > 129) return false;
+		for (const row of m) if (!Array.isArray(row) || row.length > 129) return false;
+		if (msg.d !== undefined && msg.d !== null) { if (!fin(msg.d) || msg.d < 0) return false; if (msg.d > 1000) msg.d = 1000; }
+		if (msg.v !== undefined && msg.v !== null) {
+			if (typeof msg.v !== "object" || !fin(msg.v.x) || !fin(msg.v.y)) return false;
+			msg.v = { x: Math.max(-1e4, Math.min(1e4, msg.v.x)), y: Math.max(-1e4, Math.min(1e4, msg.v.y)) };
+		}
+		if (msg.en !== undefined && msg.en !== null && (!fin(msg.en) || msg.en < 0)) return false;
+		if (msg.o !== undefined && msg.o !== null) {
+			if (typeof msg.o !== "object") return false;
+			const o = {};
+			for (const k of DIG_OPT_KEYS) {
+				const v = msg.o[k];
+				if (k === "forceRemoveAll" || v === undefined) continue;
+				if (k === "drillTierDamage") { if (fin(v) && v >= 0) o[k] = Math.min(1000, v); }
+				else if (v === true) o[k] = true;
+			}
+			msg.o = o;
+		}
+		return true;
+	}
 	function replayAction(msg, fromId) {
 		const state = ST.state;
 		if (!state) return;
 		try {
 			if (msg.k === "dig") {
+				if (!digMsgOk(state, msg)) { if (lim("digBadN", 5, 60000)) log("HOST: client dig rejected — out of the game's limits (from " + fromId + ")"); return; }
 				const ex = findApi("excavate", ["excavation", "patterns"]); // the ns name differs between builds (current=excavation, 0.5.3=patterns)
 				if (msg.en > 0) {
 					// 0.9.142: power is authoritative on the host (client's laser/drill) — no power = no excavation
@@ -7196,21 +7269,28 @@
 		}, 3000);
 		hud.querySelector("#st-host").onclick = async () => { setStatus(t("creating_lobby")); const r = await net.hostSteam(); if (!r.ok) setStatus(t("error", r.error), "#f66"); };
 		hud.querySelector("#st-invite").onclick = () => net.invite();
-		hud.querySelector("#st-host-lan").onclick = async () => { const r = await net.hostWs(27777); if (!r.ok) setStatus(t("error", r.error), "#f66"); };
+		hud.querySelector("#st-host-lan").onclick = async () => {
+			const r = await net.hostWs(27777);
+			if (!r.ok) { setStatus(t("error", r.error), "#f66"); return; }
+			ST._directMode = false; ST._directAddr = null; rememberJoin(r);
+			setStatus(t("hosting_lan", r.port || 27777) + " — " + joinAddr(ST._lanAddr));
+		};
 		// Join LAN: separate IP and PORT fields (QoL — TCentraL); window.prompt doesn't work in Electron
 		const lanRow = hud.querySelector("#st-lan-row");
 		const lanInput = hud.querySelector("#st-lan-addr");
 		const lanPort = hud.querySelector("#st-lan-port");
 		async function doJoinLan() {
-			let h = (lanInput.value || "").trim();
-			let p = (lanPort.value || "").trim();
-			// convenience: pasting "ip:port" into the IP field splits itself automatically
-			if (h.indexOf(":") >= 0) { const parts = h.split(":"); h = parts[0]; if (parts[1]) { p = parts[1]; lanPort.value = p; } lanInput.value = h; }
+			// convenience: pasting "ip:port/code" into the IP field splits itself automatically
+			const a = splitJoinAddr(lanInput.value), pf = splitJoinAddr("x:" + (lanPort.value || ""));
+			const h = a.h, code = a.code || pf.code;
+			let p = a.port || pf.port || "";
+			if (a.port) lanPort.value = p;
+			if (a.port || a.code) lanInput.value = h + (code ? "/" + code : "");
 			if (!h) { lanInput.focus(); return; }
 			const port = parseInt(p || "27777", 10);
 			if (!(port > 0 && port < 65536)) { setStatus(t("error", "port?"), "#f66"); lanPort.focus(); lanPort.select(); return; }
 			setStatus(t("creating_lobby"));
-			const r = await net.joinWs(h, port);
+			const r = await net.joinWs(h, port, code);
 			if (!r.ok) setStatus(t("error", r.error), "#f66");
 			else { lanRow.style.display = "none"; lanInput.blur(); lanPort.blur(); } // hand the keyboard back to the game
 		}
@@ -7674,7 +7754,7 @@
 						const r = await net.hostDirect(27777);
 						if (!r || !r.ok) setStatus(t("error", (r && r.error) || "?"), "#f66");
 						else {
-							ST._directAddr = (r.publicIp ? r.publicIp : null); ST._directPort = r.port || 27777; ST._directUpnp = !!r.upnp;
+							rememberJoin(r); ST._directAddr = (r.publicIp ? r.publicIp : null); ST._directPort = r.port || 27777; ST._directUpnp = !!r.upnp;
 							ST._directShown = false;
 							setStatus(r.upnp ? t("direct_ready") : t("direct_no_upnp", ST._directPort), r.upnp ? "#5f5" : "#fd5");
 							log("HOST DIRECT: upnp=" + r.upnp + " port=" + r.port + " ip=" + (r.publicIp ? "(hidden)" : "unknown") + (r.error ? " err=" + r.error : ""));
@@ -7685,7 +7765,11 @@
 				p.appendChild(bDir);
 				const bLan = lbBtn(t("btn_host_lan"), t("lb_host_lan_d"), false);
 				bLan.onclick = async () => {
-					try { const r = await net.hostWs(27777); if (!r.ok) setStatus(t("error", r.error), "#f66"); }
+					try {
+						const r = await net.hostWs(27777);
+						if (!r.ok) setStatus(t("error", r.error), "#f66");
+						else { ST._directMode = false; ST._directAddr = null; rememberJoin(r); }
+					}
 					catch (e) { setStatus(t("error", e.message), "#f66"); log("lobby hostWs error:", e.message); }
 					renderLobby(true);
 				};
@@ -7700,13 +7784,16 @@
 				go.textContent = t("btn_connect");
 				go.style.cssText = "margin-left:6px;background:#1d4a6b;color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:3px;font:600 13px inherit;cursor:pointer;padding:5px 12px";
 				const doJoin = async () => {
-					let h = (ip.value || "").trim(); let pr = (port.value || "").trim();
-					if (h.indexOf(":") >= 0) { const a = h.split(":"); h = a[0]; if (a[1]) { pr = a[1]; port.value = pr; } ip.value = h; }
+					const a = splitJoinAddr(ip.value), pf = splitJoinAddr("x:" + (port.value || ""));
+					const h = a.h, code = a.code || pf.code;
+					const pr = a.port || pf.port || "";
+					if (a.port) port.value = pr;
+					if (a.port || a.code) ip.value = h + (code ? "/" + code : "");
 					if (!h) { ip.focus(); return; }
 					const pn = parseInt(pr || "27777", 10);
 					if (!(pn > 0 && pn < 65536)) { port.focus(); port.select(); return; }
 					setStatus(t("creating_lobby"));
-					const r = await net.joinWs(h, pn);
+					const r = await net.joinWs(h, pn, code);
 					if (!r.ok) setStatus(t("error", r.error), "#f66");
 					renderLobby(true);
 				};
@@ -7758,13 +7845,14 @@
 					p.appendChild(idRow);
 				}
 				// direct host address — MASKED BY DEFAULT (stream-safe), copyable without revealing it
-				if (ST.net.role === "host" && ST._directAddr) {
+				if (ST.net.role === "host" && ST.net.transport === "ws" && (ST._directAddr || ST._lanAddr)) {
+					const addr = () => joinAddr(ST._directAddr || ST._lanAddr);
 					const row = document.createElement("div");
 					row.style.cssText = "margin:6px 0 8px;font-size:13px;color:#9f9;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
 					const lbl = document.createElement("span"); lbl.style.color = "#9fb6c9"; lbl.textContent = t("direct_addr") + ":";
 					const val = document.createElement("span");
 					val.style.cssText = "font:13px monospace;color:#9f9";
-					const paint = () => { val.textContent = ST._directShown ? (ST._directAddr + ":" + ST._directPort) : ("●●●.●●●.●●●.●●●:" + ST._directPort); };
+					const paint = () => { val.textContent = ST._directShown ? addr() : ("●●●.●●●.●●●.●●●:" + ST._directPort + (ST._joinCode ? "/●●●●●●" : "")); };
 					paint();
 					const eye = document.createElement("span");
 					eye.style.cssText = "cursor:pointer;font-size:11px;color:#6cf;text-decoration:underline";
@@ -7773,7 +7861,7 @@
 					const cp = document.createElement("span");
 					cp.style.cssText = "cursor:pointer;font-size:11px;color:#6cf;text-decoration:underline";
 					cp.textContent = "📋 " + t("lb_copy");
-					cp.onclick = async () => { try { await navigator.clipboard.writeText(ST._directAddr + ":" + ST._directPort); cp.textContent = t("direct_copied"); setTimeout(() => { cp.textContent = "📋 " + t("lb_copy"); }, 1200); } catch (e) {} };
+					cp.onclick = async () => { try { await navigator.clipboard.writeText(addr()); cp.textContent = t("direct_copied"); setTimeout(() => { cp.textContent = "📋 " + t("lb_copy"); }, 1200); } catch (e) {} };
 					const hint = document.createElement("span");
 					hint.style.cssText = "font-size:10px;color:#7d95a8"; hint.textContent = t("direct_hidden_hint");
 					row.appendChild(lbl); row.appendChild(val); row.appendChild(eye); row.appendChild(cp); row.appendChild(hint);
