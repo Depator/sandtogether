@@ -22,6 +22,7 @@
 	const VACUUM_CAPS = [500, 1000, 1500, 2000, 2500, 3000]; // capacity table from the game code (module 6420)
 	const RJ_FIRE = 11, RJ_FREEZINGICE = 12; // RJ enum values from the current build (for createAt on the host)
 	const MT_LIQUID = 2, MT_GAS = 4, MT_STATIC = 5; // MatterType from the current build — vacuum does NOT suck them up (vanilla)
+	const UI_MANAGEMENT = 6, UI_TECH_TREE = 9; // ComponentId (JU) values, same in 0.5.7 and 0.6.0
 	const CHUNK = 40;
 
 	// ------------------------------------------------------------------
@@ -102,6 +103,7 @@
 			lb_pick_save: "📂 Choose a save...", lb_pick_save_d: "load a specific world instead of the last one",
 			lb_new_note: "New map? Close this window and click New Game — hosting stays active, the world is sent to players when you enter it.",
 			host_enter_world_first: "Enter your world first (Continue / Load Game) — it will be sent to players automatically.",
+			tf_deploy_host: "Test Flight: only the host can pick the landing site (deploy / redeploy)",
 		},
 		pl: {
 			offline: "offline", btn_host: "Host (Steam)", btn_invite: "Zaproś", btn_host_lan: "Host LAN",
@@ -168,6 +170,7 @@
 			lb_pick_save: "📂 Wybierz save...", lb_pick_save_d: "wczytaj konkretny świat zamiast ostatniego",
 			lb_new_note: "Nowa mapa? Zamknij to okno i kliknij Nowa — hosting zostaje aktywny, świat wyśle się graczom gdy do niego wejdziesz.",
 			host_enter_world_first: "Najpierw wejdź do świata (Kontynuuj / Wczytaj) — graczom wyśle się automatycznie.",
+			tf_deploy_host: "Test Flight: miejsce lądowania (deploy / redeploy) wybiera tylko host",
 		},
 		zh: {
 			offline: "离线", btn_host: "创建房间 (Steam)", btn_invite: "邀请", btn_host_lan: "局域网主机",
@@ -1517,6 +1520,14 @@
 		} else if (msg.t === "grabRef") {
 			// placement REFUND (R5): the host failed to place the element (cell occupied) → give it back to the tank
 			if (ST.net.role === "client" && typeof msg.et === "number" && msg.et > 0) clientFillGrabTank([msg.et], null);
+		} else if (msg.t === "vjres") {
+			// voidjuice the host could not convert any more (taken meanwhile): take it back out of our tank
+			const tank = ST.net.role === "client" && ST.state && ST.state.store.mods && ST.state.store.mods[msg.sm];
+			if (tank && Number.isFinite(tank.voidAmmo)) {
+				tank.voidAmmo = Math.max(0, tank.voidAmmo - Math.max(0, msg.lost | 0));
+				if (ST._vjSeen) ST._vjSeen[msg.sm] = tank.voidAmmo;
+				try { ST.FH.ui.overlays.update(ST.state, "hotbar"); } catch (e) { swallow("voidjuice", e); }
+			}
 		} else if (msg.t === "redirty") {
 			// The client briefly ran its own simulation (the game save resumed its thread) — these chunks may
 			// differ from ours. We clear the row hashes for them, so they get resent in full.
@@ -3282,6 +3293,22 @@
 				try { if (data.signalLinks) links = JSON.parse(JSON.stringify(data.signalLinks)); } catch (e) {}
 				if (list.length) { net.send({ t: "act", k: "paste", list, links }); log("CLIENT paste →", list.length, "structures"); }
 			});
+			// 0.6.0 linked pairs: linking two existing structures only rewrites their data, nothing is built
+			ST.FH.events.on(state, "building:linksChanged", (st, data) => {
+				if (ST._applyingNet || ST.net.role !== "client" || !ST.wsx.paused || !data || !data.structure) return;
+				const s = data.structure, cfg = linkCfg(state, s.type);
+				if (!cfg) return;
+				const v = linkPositions(s.data && s.data[cfg.key]);
+				net.send({ t: "act", k: "link", x: s.x, y: s.y, type: s.type, key: cfg.key, v });
+				try { dataSeenSet(structKey(s), s); } catch (e) { swallow("links", e); } // the sdata scan must not send it again
+				log("CLIENT link change →", s.type, "@", s.x, s.y, "(" + v.length + " link" + (v.length === 1 ? "" : "s") + ")");
+			});
+			// 0.6.0 area gates (Test Flight launch): the button only emits locally
+			ST.FH.events.on(state, "factory:areaGateActionSelected", (st, data) => {
+				if (ST._applyingNet || ST.net.role !== "client" || !ST.wsx.paused || !data || typeof data.gateId !== "string") return;
+				net.send({ t: "act", k: "gate", id: data.gateId });
+				log("CLIENT area gate action →", data.gateId);
+			});
 			log("Structure/item event subscription active");
 		} catch (e) { log("subscribe error:", e.message); }
 	}
@@ -4690,10 +4717,12 @@
 					th: techFlagsForNet(state), // tech tree (without the junk "undefined" key)
 					pg: state.store.progression || null,    // progression (upgradesUnlocked, dungeons)
 					bl: (state.store.player && state.store.player.buildings) || null, // unlocked buildings (idea: Cr0ss0vr, PR #13)
+					// 0.6.0: Test Flight and Gold Well lock, unlock and hide tech nodes during play
+					lk: { l: state.store.lockedTechs || null, h: state.store.hiddenTechs || null },
 				};
 				if (!ST._resHeavySig) ST._resHeavySig = {};
 				// round-robin, so no single section can be starved by a neighbour that changes more often
-				const klucze = ["st", "gl", "up", "th", "pg", "bl"];
+				const klucze = ["st", "gl", "up", "th", "pg", "bl", "lk"];
 				const start = (ST._resHeavyIdx || 0) % klucze.length;
 				for (let k = 0; k < klucze.length; k++) {
 					const key = klucze[(start + k) % klucze.length];
@@ -4985,6 +5014,15 @@
 				// and was dragging the rest of the section along with it every few seconds. Keys the host leaves
 				// out of a partial update keep their current value here.
 				state.store.mods = Object.assign({}, state.store.mods || {}, msg.st);
+				// voidjuice tanks are per player (see VOID_AMMO): keep our own fill, take the rest of the section
+				for (const [sm] of VOID_AMMO) {
+					const mine = prevMods[sm], theirs = state.store.mods[sm];
+					if (!mine || !theirs || mine === theirs) continue;
+					const merged = Object.assign({}, theirs);
+					for (const k of VOID_AMMO_KEYS) if (mine[k] !== undefined) merged[k] = mine[k];
+					state.store.mods[sm] = merged;
+				}
+				try { const d = msg.st["native.testFlight"] && msg.st["native.testFlight"].deployment; if (d) ST._tfHostPhase = d.phase; } catch (e) { swallow("modsStream", e); }
 				// 0.9.226 (REPORT "client color is always the same as the host's"): FH.storage.ensure(e,key)
 				// it's simply state.store.mods[key] (verified in bundle.js), and the color choice sits under
 				// "foundationColorPicker". Since the whole store.mods comes from the host, the client's choice was
@@ -5102,11 +5140,20 @@
 					}
 				} catch (e) { log("progress sync error:", e.message); }
 			}
-			if (msg.th && ST.wsx.everApplied && !ST._loadingWorld && state.store.scene && state.store.scene.active !== 1 && state.store.player && state.store.player.tech) {
+			// 0.6.0: lock/hide flags live in the store; a node locked here makes the game refuse the team's tech below
+			if (msg.lk && typeof msg.lk === "object") {
+				if (msg.lk.l && typeof msg.lk.l === "object") state.store.lockedTechs = Object.assign({}, msg.lk.l);
+				if (msg.lk.h && typeof msg.lk.h === "object") state.store.hiddenTechs = Object.assign({}, msg.lk.h);
+				try { ST.FH.ui.update(state, UI_MANAGEMENT); ST.FH.ui.update(state, UI_TECH_TREE); } catch (e) { swallow("techLocks", e); }
+			}
+			// th only travels when it changes, so team tech refused for a lock is retried with the last copy once the locks arrive
+			if (msg.th) ST._lastTh = msg.th;
+			const th = msg.th || (msg.lk ? ST._lastTh : null);
+			if (th && ST.wsx.everApplied && !ST._loadingWorld && state.store.scene && state.store.scene.active !== 1 && state.store.player && state.store.player.tech) {
 				// DEPENDENCY ORDER (0.9.89): the tree has prerequisites, and the object's keys arrive
 				// in arbitrary order — a "child" attempt before the "parent" is rejected by the game.
 				// We repeat the pass as long as anything is unlocking (fixed point, max 6 rounds).
-				let todo = Object.keys(msg.th).filter((k) => k !== "undefined" && msg.th[k] && !state.store.player.tech[k]);
+				let todo = Object.keys(th).filter((k) => k !== "undefined" && th[k] && !state.store.player.tech[k]);
 				for (let round = 0; round < 6 && todo.length; round++) {
 					const stillTodo = [];
 					let progress = false;
@@ -5988,7 +6035,7 @@
 	// DN triggered by creatures/drones is NOT forwarded (the host counts them itself).
 	// 0.9.142: the dig profile (fromDrill/fromRocketExplosion/...) decides the material TIER — without it the host replayed
 	// every client dig as a SHOVEL, so the client's laser/drill/void gun didn't move hard materials.
-	const DIG_OPT_KEYS = ["fromGun", "fromRocketExplosion", "fromDrill", "useLiteralOutVelocity", "destroyNonDestructible", "forceRemoveAll", "drillTierDamage"];
+	const DIG_OPT_KEYS = ["fromGun", "fromRocketExplosion", "fromDrill", "fromBeam", "useLiteralOutVelocity", "destroyNonDestructible", "forceRemoveAll", "drillTierDamage"];
 	function digOptsForNet(opts) {
 		if (!opts || typeof opts !== "object") return null;
 		let o = null;
@@ -6299,6 +6346,204 @@
 		} catch (e) { return false; }
 	};
 
+	// ------------------------------------------------------------------
+	// 0.6.0 CONTENT — native mods whose player actions never reach a paused client's world
+	// ------------------------------------------------------------------
+	// Linked pairs (thermal teleporter, quantum portals): the link is a position (or a list of them) in
+	// structure.data under a per-type key, set by the game's link setter, which emits "building:linksChanged".
+	function linkCfg(state, type) {
+		const reg = state && state.sandkit && state.sandkit.mods && state.sandkit.mods.structures;
+		if (!reg) return null;
+		const n = Object.keys(reg).length;
+		if (!ST._linkCfg || ST._linkCfgReg !== reg || ST._linkCfgN !== n) {
+			ST._linkCfgReg = reg; ST._linkCfgN = n; ST._linkCfg = new Map();
+			for (const id of Object.keys(reg)) {
+				const lp = reg[id] && reg[id].linkedPair;
+				if (!lp || typeof lp.partnerStructureId !== "string") continue;
+				const multi = lp.allowMultipleLinks === true;
+				ST._linkCfg.set(id, { key: lp.positionDataKey || "linkedPosition", multi });
+				ST._linkCfg.set(lp.partnerStructureId, { key: lp.partnerPositionDataKey || "linkedPosition", multi });
+			}
+		}
+		return ST._linkCfg.get(String(type)) || null;
+	}
+	const linkPositions = (v) => (Array.isArray(v) ? v : v ? [v] : [])
+		.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y)).map((p) => ({ x: p.x | 0, y: p.y | 0 }));
+	// the game's value format: one position as an object, several as an array, none as undefined
+	const linkValue = (cfg, list) => (!list.length ? undefined : cfg.multi && list.length > 1 ? list : list[0]);
+	function setLinkData(state, s, key, val) {
+		const patch = {}; patch[key] = val;
+		// like the game's link setter: a queued structure only gets the data, a built one also goes to the workers
+		if (s.queued) s.data = Object.assign({}, s.data || {}, patch);
+		else structNs().setData(state, s, patch, { propagateToWorkers: true });
+		try { ST.FH.events.emit(state, "building:linksChanged", { structure: s, x: s.x, y: s.y }); } catch (e) { swallow("links", e); }
+		try { dataSeenSet(structKey(s), s); } catch (e) { swallow("links", e); }
+		if (ST.net.role === "host") net.send({ t: "st", k: "add", list: [slimStruct(s)] });
+	}
+	// A client placing a partner onto an existing anchor (thermal teleporter exits) builds only the new
+	// structure; the anchor's half of the link is added by the game after the build, which the client skipped.
+	function hostLinkBack(state, built) {
+		try {
+			const cfg = linkCfg(state, built.type);
+			if (!cfg) return;
+			// buildOne sets the data after "building:placed", so caches keyed on that event saw no link yet
+			ST.FH.events.emit(state, "building:linksChanged", { structure: built, x: built.x, y: built.y });
+			const SA = structNs();
+			for (const p of linkPositions(built.data && built.data[cfg.key])) {
+				const other = SA.getAtCell(state, p.x, p.y);
+				if (!other || other === built || other.x !== p.x || other.y !== p.y) continue;
+				const oc = linkCfg(state, other.type);
+				if (!oc) continue;
+				const list = linkPositions(other.data && other.data[oc.key]);
+				if (list.some((q) => q.x === built.x && q.y === built.y)) continue;
+				if (!oc.multi && list.length) continue; // the game never replaces an existing single link
+				list.push({ x: built.x, y: built.y });
+				setLinkData(state, other, oc.key, linkValue(oc, list));
+				log("HOST: linked", other.type, "@", other.x, other.y, "to client-placed", built.type, "@", built.x, built.y);
+			}
+		} catch (e) { swallow("hostLinkBack", e); }
+	}
+
+	// Magnet (native.magnet): while held, the item keeps a source in a spatial field the simulation reads.
+	// A paused client's source moves nothing, so the host holds one per client at the client's aim point.
+	const MAGNET_ITEM = "magnet", MAGNET_FIELD = "external:native.magnet:spatialField:field", MAGNET_R = 32, MAGNET_V = [1000];
+	function magnetField(state) {
+		try { const SF = ST.FH.workers && ST.FH.workers.spatialFields; return (SF && SF.get && SF.get(state, MAGNET_FIELD, "sandtogether")) || null; }
+		catch (e) { swallow("magnet", e); return null; }
+	}
+	function hostMagnet(state, msg, fromId) {
+		const src = ST._magSrc || (ST._magSrc = new Map());
+		let cur = src.get(fromId);
+		if (cur && cur.st !== state) cur = null; // the field belongs to the world state, ids die with it
+		const f = magnetField(state);
+		if (!f) { if (lim("magNoField", 3)) log("HOST magnet: no spatial field (native.magnet not loaded?)"); return; }
+		if (msg.off) {
+			if (cur) { try { f.remove(cur.id); } catch (e) { swallow("magnet", e); } }
+			src.delete(fromId);
+			return;
+		}
+		const x = msg.x | 0, y = msg.y | 0, sz = state.store.world && state.store.world.size;
+		if (!sz || x < 0 || y < 0 || x >= sz.width || y >= sz.height) return;
+		let id = cur ? cur.id : -1;
+		try { if (id === -1 || !f.update(id, x, y)) id = f.add(x, y, MAGNET_R, MAGNET_V); }
+		catch (e) { swallow("magnet", e); id = -1; }
+		if (id === -1) { src.delete(fromId); return; }
+		if (!cur && lim("magDiag", 10)) log("HOST: client magnet on @", x, y, "from", fromId);
+		src.set(fromId, { id, x, y, st: state, t: performance.now() });
+	}
+	function hostMagnetTick(state) {
+		const src = ST._magSrc;
+		if (!src || !src.size) return;
+		const f = magnetField(state), now = performance.now();
+		for (const [pid, m] of src) {
+			// no keepalive for 500 ms = released, dropped packet or a gone peer
+			if (m.st !== state || now - m.t > 500 || !ST.peers.has(pid)) {
+				try { if (f && m.st === state) f.remove(m.id); } catch (e) { swallow("magnet", e); }
+				src.delete(pid);
+				continue;
+			}
+			try { ST.FH.world.reportActivityInCircle(state, m.x, m.y, MAGNET_R); } catch (e) { swallow("magnet", e); }
+		}
+	}
+	function clientMagnetTick(state) {
+		const m = ST._magTx || (ST._magTx = { on: false, x: 0, y: 0, t: 0 });
+		let on = false, cx = 0, cy = 0;
+		try {
+			const act = state.session && state.session.action;
+			if (act && act.state && act.state[2] && ST.FH.items && ST.FH.items.isActive(state, MAGNET_ITEM)) {
+				// the item's own point: 24 px past the muzzle along the aim
+				const mz = ST.FH.player.getItemMuzzleAtWorld(state, MAGNET_ITEM);
+				cx = Math.floor((mz.x + 24 * Math.cos(mz.angleRadians)) / CELL);
+				cy = Math.floor((mz.y + 24 * Math.sin(mz.angleRadians)) / CELL);
+				on = Number.isFinite(cx) && Number.isFinite(cy);
+			}
+		} catch (e) { swallow("magnet", e); }
+		const now = performance.now();
+		if (on) {
+			const moved = cx !== m.x || cy !== m.y;
+			if (!m.on || (moved && now - m.t > 50) || now - m.t > 200) {
+				net.send({ t: "act", k: "mag", x: cx, y: cy });
+				m.on = true; m.x = cx; m.y = cy; m.t = now;
+			}
+		} else if (m.on) { net.send({ t: "act", k: "mag", off: 1 }); m.on = false; }
+	}
+
+	// Voidjuice ammo (implosion gun; since 0.6.0 also the locator and the hologram echo). Loading counts
+	// voidjuice cells near the muzzle into a tank in store.mods and turns them into voidhusk through the
+	// mutation queue, which a paused client drops. The tank is per player; the conversion runs on the host.
+	const VOID_AMMO = [["implosionGun", "implosionGun"], ["locator", "locator"], ["native.hologramEcho", "hologramEcho"]];
+	const VOID_AMMO_KEYS = ["voidAmmo", "maxVoidAmmo", "hasLoadedVoidjuice", "initialEmptyToastShown", "addedToastShown"];
+	function voidjuiceCellsNear(state, item, max) {
+		const out = [];
+		try {
+			const EL = ST.FH.elements, vj = EL.getElementTypeFromId(state, "voidjuice");
+			const mz = ST.FH.player.getItemMuzzleAtWorld(state, item);
+			// the game only loads with the muzzle in voidjuice; any other rise of the tank is a refund
+			if (EL.getResolvedTypeAtPos(state, Math.floor(mz.x / CELL), Math.floor(mz.y / CELL)) !== vj) return out;
+			const r = 4 * CELL, r2 = r * r; // same circle and scan order as the game's loader
+			const x0 = Math.floor((mz.x - r) / CELL), y0 = Math.floor((mz.y - r) / CELL);
+			const x1 = Math.ceil((mz.x + r) / CELL), y1 = Math.ceil((mz.y + r) / CELL);
+			for (let y = y0; y < y1 && out.length < max; y++) for (let x = x0; x < x1 && out.length < max; x++) {
+				const dx = x * CELL + CELL / 2 - mz.x, dy = y * CELL + CELL / 2 - mz.y;
+				if (dx * dx + dy * dy <= r2 && EL.getResolvedTypeAtPos(state, x, y) === vj) out.push([x, y]);
+			}
+		} catch (e) { swallow("voidjuice", e); }
+		return out;
+	}
+	function clientVoidAmmoTick(state) {
+		const mods = state.store.mods;
+		if (!mods || ST._applyingNet) return;
+		const seen = ST._vjSeen || (ST._vjSeen = {});
+		for (const [sm, item] of VOID_AMMO) {
+			const tank = mods[sm];
+			if (!tank || !Number.isFinite(tank.voidAmmo)) continue;
+			const prev = seen[sm], cur = tank.voidAmmo;
+			seen[sm] = cur;
+			if (prev === undefined || cur <= prev) continue;
+			let active = false;
+			try { active = ST.FH.items.isActive(state, item); } catch (e) { swallow("voidjuice", e); }
+			if (!active) continue;
+			// the game counted cells it cannot convert here; claim exactly those and hide them locally,
+			// otherwise it counts them again every frame until the mirror catches up
+			const cells = voidjuiceCellsNear(state, item, cur - prev);
+			if (!cells.length) continue;
+			for (const c of cells) grabClearLocal(state, c[0], c[1]);
+			if (cells.length < cur - prev) { tank.voidAmmo = prev + cells.length; seen[sm] = tank.voidAmmo; }
+			net.send({ t: "act", k: "vj", sm, c: cells });
+		}
+	}
+	function hostVoidjuice(state, msg, fromId) {
+		const cells = Array.isArray(msg.c) ? msg.c.slice(0, 400) : [];
+		let ok = 0;
+		ST._applyingNet = true;
+		try {
+			const EL = ST.FH.elements, sz = state.store.world.size;
+			const vj = EL.getElementTypeFromId(state, "voidjuice"), husk = EL.getElementTypeFromId(state, "voidhusk");
+			for (const c of cells) {
+				const x = Array.isArray(c) ? c[0] | 0 : -1, y = Array.isArray(c) ? c[1] | 0 : -1;
+				if (x < 0 || y < 0 || x >= sz.width || y >= sz.height) continue;
+				if (EL.getResolvedTypeAtPos(state, x, y) !== vj) continue;
+				EL.replaceAt(state, x, y, husk);
+				markCellDirty(state, x, y);
+				ok++;
+			}
+		} catch (e) { swallow("act:vj", e); } finally { ST._applyingNet = false; }
+		if (ok < cells.length) net.send({ t: "vjres", sm: msg.sm, lost: cells.length - ok }, fromId);
+		if (lim("vjDiag", 20)) log("HOST: client voidjuice", msg.sm, ok + "/" + cells.length, "cells loaded");
+	}
+
+	// Test Flight deploy and redeploy run inside the native mod's closure on the side that clicks. A client
+	// would land the ship on its own screen only, so it is turned back with a note; the host deploys.
+	function clientDeployGuard(state) {
+		const tf = state.store.mods && state.store.mods["native.testFlight"];
+		const dep = tf && tf.deployment;
+		if (!dep || (dep.phase !== "selecting" && dep.phase !== "redeploying")) return;
+		if (dep.phase === ST._tfHostPhase) return; // the host is the one deploying
+		tf.deployment = dep.phase === "selecting" ? { phase: "prompted" } : Object.assign({}, dep, { phase: "landed" });
+		setStatus(t("tf_deploy_host"), "#fd5");
+		log("CLIENT: Test Flight " + (dep.phase === "selecting" ? "deploy" : "redeploy") + " is host-only — reverted");
+	}
+
 	// ST-FIX (throughput): one placement = one network packet. When dragging
 	// a foundation the client used to send hundreds of them, and the host sent back just as many "st add" broadcasts —
 	// hence the feeling of "2G internet" while building. The body is factored out so that the same
@@ -6408,6 +6653,7 @@
 				// (that one has worked for players since 0.9.142).
 				try { const SAf = structNs(); if (SAf && SAf.update) SAf.update(state, built, { propagateToWorkers: true }); } catch (e) { swallow("hostPlaceOne", e); }
 			}
+			if (nowaStruktura) hostLinkBack(state, built);
 			const inStore = (state.store.structures || []).indexOf(built) >= 0;
 			if (ST._addQ) ST._addQ.push(slimStruct(built)); else net.send({ t: "st", k: "add", list: [slimStruct(built)] });
 			if (lim("plDiagH", 300)) log("HOST: placed", msg.type, "@", built.x, built.y, "(request", msg.x, msg.y + ")", inStore ? "[w store]" : "[!! NOT in store.structures]", "-> broadcast");
@@ -6739,6 +6985,28 @@
 						log("HOST: machine config from client:", msg.type, "@", msg.x, msg.y, msg.f !== undefined ? "(+filter)" : "");
 					}
 				} finally { ST._applyingNet = false; }
+			} else if (msg.k === "link") {
+				// 0.6.0 linked pair changed by the client: only the link key, so the rest of the host's data stays
+				const SAl = structNs();
+				const s = SAl && SAl.getAtCell(state, msg.x, msg.y);
+				const cfg = s && s.x === msg.x && s.y === msg.y && String(s.type) === String(msg.type) ? linkCfg(state, s.type) : null;
+				if (cfg && cfg.key === msg.key) {
+					ST._applyingNet = true;
+					try { setLinkData(state, s, cfg.key, linkValue(cfg, linkPositions(msg.v))); } finally { ST._applyingNet = false; }
+					log("HOST: client link change:", s.type, "@", s.x, s.y);
+				} else if (lim("linkMissDiag", 10)) log("HOST: client link change for a structure the host does not have:", msg.type, "@", msg.x, msg.y);
+			} else if (msg.k === "mag") {
+				hostMagnet(state, msg, fromId);
+			} else if (msg.k === "vj") {
+				hostVoidjuice(state, msg, fromId);
+			} else if (msg.k === "gate") {
+				// 0.6.0 area gate action (Test Flight launch): the game checks readiness again on the host
+				const AG = ST.FH.factory && ST.FH.factory.areaGates;
+				let ok = false;
+				ST._applyingNet = true;
+				try { if (AG && AG.selectAction && typeof msg.id === "string") ok = !!AG.selectAction(state, msg.id); }
+				catch (e) { swallow("act:" + msg.k, e); } finally { ST._applyingNet = false; }
+				log("HOST: client area gate action", msg.id, ok ? "accepted" : "refused (not ready on the host)");
 			} else if (msg.k === "aug") {
 				// augment choice by the client: the host takes over the whole object (nodes/pendingChoice/sockets);
 				// stream mods will spread the state to everyone (also closes the overlay on the client's side)
@@ -9792,6 +10060,7 @@
 			T("res", () => sendResourcesIfDue(state));
 			T("ent", () => sendEntitiesIfDue(state));
 			T("wi", () => sendWorldItemsIfChanged(state)); // szybkie dropy (G12)
+			T("mag", () => hostMagnetTick(state));         // 0.6.0: clients' magnet sources
 		}
 		// FRAME PROFILER (0.9.154, permanent): one "MOD-FRAME" line every 10 s, ONLY when there are spikes —
 		// "FPS drops" reports now come in with data (how many frames > 25 ms and whose cost it is).
@@ -10135,10 +10404,12 @@
 				ST._fireQ = []; ST._cryoQ = []; ST._volcQ = []; ST._caulkQ = []; ST._caulkRmQ = []; ST._shakeQ = [];
 				if (ST._dataSeen) ST._dataSeen.clear();
 				if (ST._dataEdited) ST._dataEdited.clear();
+				ST._vjSeen = null; // voidjuice tank baselines belong to the previous world
 			}
 			// client profile (G7-lite): saved every 10s (position+inventory per host world)
 			if (now - (ST._profT || 0) > 10000) { ST._profT = now; profileSave(state); }
 			scanDataEditsIfDue(state); // machine config edited by the client → forward (G5b)
+			if (ST.wsx.paused) { clientMagnetTick(state); clientVoidAmmoTick(state); clientDeployGuard(state); } // 0.6.0 content
 			// AUGMENTS: the client's choice (screen after the artifact) mutates mods.augments locally — diff every 500ms
 			// vs. the last stream snapshot → forward the whole object to the host (host = team authority).
 			if (now - (ST._augScanT || 0) > 500) {
