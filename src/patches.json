@@ -955,7 +955,7 @@
 			"variants": [
 				{
 					"anchor": ",Se=(e,t)=>{if(e.type!==t.type)return!1;const n=i.A.snapGridCellSize,r=t.x-e.x,o=t.y-e.y;if(Math.abs(r)+Math.abs(o)!==n)return!1;const a=le(r,o),s=le(-r,-o),l=oe(e),c=oe(t),d=0===(l.pipeConnectionMask&a)||0===(c.pipeConnectionMask&s);return l.pipeConnectionMask|=a,c.pipeConnectionMask|=s,d}",
-					"patched": ",Se=(e,t)=>{if(e.type!==t.type)return!1;const n=i.A.snapGridCellSize,r=t.x-e.x,o=t.y-e.y;if(Math.abs(r)+Math.abs(o)!==n)return!1;const a=le(r,o),s=le(-r,-o),l=oe(e),c=oe(t),d=0===(l.pipeConnectionMask&a)||0===(c.pipeConnectionMask&s);return l.pipeConnectionMask|=a,c.pipeConnectionMask|=s,d},__stPipe=(window.SandTogether&&(window.SandTogether._pipeApi={get connect(){return Se},get refresh(){return Ue},get relink(){return Ne},get at(){return Q},get path(){return Ce},get run(){return Ie},get sprite(){return Z},get isSegment(){return O}}),0)",
+					"patched": ",Se=(e,t)=>{if(e.type!==t.type)return!1;const n=i.A.snapGridCellSize,r=t.x-e.x,o=t.y-e.y;if(Math.abs(r)+Math.abs(o)!==n)return!1;const a=le(r,o),s=le(-r,-o),l=oe(e),c=oe(t),d=0===(l.pipeConnectionMask&a)||0===(c.pipeConnectionMask&s);return l.pipeConnectionMask|=a,c.pipeConnectionMask|=s,d},__stPipe=(window.SandTogether&&(window.SandTogether._pipeApi={get connect(){return Se},get refresh(){return Ue},get relink(){return Ne},get at(){return Q},get path(){return Ce},get run(){return Ie},get sprite(){return Z},get isSegment(){return O},get pastePlan(){return fe},get pasteLink(){return Ee}}),0)",
 					"note": "game 0.6.0 (Update #5, 2026-10-21)"
 				},
 				{
