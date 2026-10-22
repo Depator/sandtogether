@@ -13,6 +13,23 @@
 			"id": "frame",
 			"name": "frame hook (state+FH capture)",
 			"critical": true,
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"FH",
+							"Ie",
+							"Mc"
+						],
+						"m": [
+							13125,
+							46781
+						],
+						"frame": "FH"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "se.FH.events.emit(e,\"frame:update\",{state:",
@@ -28,6 +45,23 @@
 		{
 			"id": "dig",
 			"name": "dig hook (DN)",
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"DN",
+							"Al"
+						],
+						"m": [
+							15585
+						],
+						"wrap": "DN",
+						"hook": "_dig",
+						"mode": "skip"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "},T=(e,t,n,r,o,i,a={},s)=>{const l=Math.floor(r.length/2);",
@@ -129,6 +163,23 @@
 			"id": "drone",
 			"name": "drone deploy hook (_drone)",
 			"critical": false,
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"_z",
+							"Ul"
+						],
+						"m": [
+							63570
+						],
+						"wrap": "_z",
+						"hook": "_drone",
+						"mode": "pre"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "C=(e,t)=>{e.store.drones.push(t)}",
@@ -164,6 +215,23 @@
 			"id": "grab",
 			"name": "grabber host-side hook (_grab)",
 			"critical": false,
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"wK",
+							"fG"
+						],
+						"m": [
+							50348
+						],
+						"wrap": "wK",
+						"hook": "_grab",
+						"mode": "skip"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "H=(e,t)=>{var n,l,h,g,y,x,k,C;let S=e.session;const M=t.data.matrix;let T=M[1];",
@@ -264,6 +332,23 @@
 		{
 			"id": "projCtx",
 			"name": "projectile-update flag (m)",
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"Ul",
+							"_z"
+						],
+						"m": [
+							63570
+						],
+						"wrap": "Ul",
+						"hook": "_projCtx",
+						"mode": "flag"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "U=(e,t)=>e.store.projectiles.forEach(n=>(0,i.Hm)(e,n,t)),",
@@ -536,6 +621,34 @@
 			"id": "demolExports",
 			"name": "demolish module exports (pipeZn/areaL)",
 			"critical": false,
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"Zn",
+							"cZ",
+							"k7"
+						],
+						"m": [
+							34142
+						],
+						"get": "Zn",
+						"as": "_pipeZn"
+					},
+					{
+						"exports": [
+							"Cj",
+							"$X"
+						],
+						"m": [
+							40443
+						],
+						"get": "Cj",
+						"as": "_areaL"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "Q=e=>{const t=e.session.action.customData.pos;return(0,s.GO)(t.start.x,t.start.y,t.end.x,t.end.y)}}",
@@ -565,6 +678,20 @@
 			"id": "techMod",
 			"name": "tech module export (_techMod)",
 			"critical": false,
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"BRANCH_PARENTS"
+						],
+						"m": [
+							77135
+						],
+						"as": "_techMod"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "77135(e,t,n){\"use strict\";n.r(t),n.d(t,{BRANCH_PARENTS:()=>$,",
@@ -608,6 +735,35 @@
 		{
 			"id": "dropLu",
 			"name": "mutation-queue drop (Lu)",
+			"registry": {
+				"full": true,
+				"use": [
+					{
+						"exports": [
+							"Lu",
+							"f6"
+						],
+						"m": [
+							79030
+						],
+						"wrap": "Lu",
+						"hook": "_dropLu",
+						"mode": "skip"
+					},
+					{
+						"exports": [
+							"Lu",
+							"f6"
+						],
+						"m": [
+							79030
+						],
+						"wrap": "f6",
+						"hook": "_dropLu",
+						"mode": "skip"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "function m(e,t,n,r){o.push({x:t,y:n,apply:r}),s.add(p(t,n))}function h(e){i.push(e)}",
@@ -779,6 +935,33 @@
 		{
 			"id": "bpBulk",
 			"name": "build preview export (_bpPos/_drawStruct)",
+			"registry": {
+				"full": false,
+				"use": [
+					{
+						"exports": [
+							"gJ",
+							"ky"
+						],
+						"m": [
+							99912
+						],
+						"get": "gJ",
+						"as": "_drawStruct"
+					},
+					{
+						"exports": [
+							"gJ",
+							"ky"
+						],
+						"m": [
+							99912
+						],
+						"get": "ky",
+						"as": "_drawBridge"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "const J=_.positions,Z=e.session.rendering.overlayContext;",
@@ -903,6 +1086,33 @@
 			"id": "projSprite",
 			"name": "projectile sprite api export (_sprAdd)",
 			"critical": false,
+			"registry": {
+				"full": false,
+				"use": [
+					{
+						"exports": [
+							"P9",
+							"GA"
+						],
+						"m": [
+							50728
+						],
+						"get": "P9",
+						"as": "_sprAdd"
+					},
+					{
+						"exports": [
+							"P9",
+							"GA"
+						],
+						"m": [
+							50728
+						],
+						"get": "GA",
+						"as": "_sprDel"
+					}
+				]
+			},
 			"variants": [
 				{
 					"anchor": "const m=e=>{switch(e){case a.Ag.Bullet:return\"bullet\";case a.Ag.Rocket:return\"rocket\";case a.Ag.Digger:return\"digger\";default:return null}}",

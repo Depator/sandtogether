@@ -3,7 +3,8 @@
 // Author / Autor: KAMIL PADULA
 // Patcher: applies the mod onto the unpacked game copy (resources/app).
 // Idempotent — safe to run repeatedly and after every game update.
-// Usage: node patch.js <path-to-resources/app> [--report <file.json>] [--no-wildcard]
+// Usage: node patch.js <path-to-resources/app> [--report <file.json>] [--no-wildcard] [--skip <id,id>]
+// --skip leaves those string patches out, so their registry hooks take over (testing).
 // ============================================================================
 
 'use strict';
@@ -14,10 +15,11 @@ const engine = require('./st-patch-engine.js');
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i >= 0 ? args.splice(i, 2)[1] : null; };
 const REPORT = opt('--report');
+const SKIP = (opt('--skip') || '').split(',').filter(Boolean);
 const WILDCARD = !(args.includes('--no-wildcard') || process.env.ST_NO_WILDCARD === '1');
 const APP = args.find((a) => !a.startsWith('--'));
 const SRC = __dirname;
-if (!APP) { console.error('Usage: node patch.js <path-to-resources/app> [--report <file.json>] [--no-wildcard]'); process.exit(1); }
+if (!APP) { console.error('Usage: node patch.js <path-to-resources/app> [--report <file.json>] [--no-wildcard] [--skip <id,id>]'); process.exit(1); }
 
 const read = (p) => fs.readFileSync(p, 'utf8');
 const write = (p, s) => fs.writeFileSync(p, s, 'utf8');
@@ -56,14 +58,16 @@ let bundleRes = null;
 {
   const p = path.join(APP, 'dist/js/bundle.js');
   const defs = JSON.parse(read(path.join(SRC, 'patches.json')));
-  const res = engine.patchBundleFile(p, defs, { wildcard: WILDCARD });
+  const res = engine.patchBundleFile(p, defs, { wildcard: WILDCARD, skip: SKIP });
   if (res.fhAlias && res.fhAlias !== 'ie') console.log('  [i] FH module alias in this build: "' + res.fhAlias + '" (re-minified bundle - anchors rewritten from "ie.FH")');
   if (res.wildcardDropped) console.warn('  [!] auto-adapted hooks broke the bundle syntax - applied without them');
+  if (res.registryError) console.warn('  [!] webpack registry not readable (' + res.registryError + ') - string patches only');
   for (const r of res.results) {
     if (r.ambiguous) console.error('ERROR: variant "' + r.name + '" occurrences>1 (' + r.ambiguous + 'x)');
     if (r.status === 'applied') done('bundle.js: ' + r.name);
     else if (r.status === 'already') skip('bundle.js ' + r.name);
     else if (r.status === 'wildcard') { changes++; console.log('  [~] bundle.js: ' + r.name + ' (auto-adapted from variant ' + r.variant + ': ' + Object.entries(r.map).map(([a, b]) => a + '->' + b).join(' ') + ')'); }
+    else if (r.status === 'registry') console.log('  [r] bundle.js: ' + r.name + ' (' + (r.reason === 'skipped' ? 'skipped' : 'no string variant') + ', hooked through the webpack registry)');
     else if (r.critical) console.error('  [X] CRITICAL hook "' + r.name + '" did not match - this game build is not supported yet');
     else console.warn('  [!] skipped (feature unavailable on this game build): ' + r.name);
   }

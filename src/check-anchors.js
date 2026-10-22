@@ -7,8 +7,9 @@
 //   ST_GAME_VERSIONS=<dir> replaces the target list.
 //   --wildcard  also report what the wildcard fallback would recover (installers do this)
 //   --emit      print reviewed-ready 0.x variants for the wildcard recoveries (JSON)
-// Per patch and build: OK (literal variant N), ALREADY, WILD (auto-adapted), MISS, AMBIGUOUS.
-// Exit 2 when any build misses a patch or matches ambiguously without wildcards.
+// Per patch and build: OK (literal variant N), ALREADY, WILD (auto-adapted), MISS, AMBIGUOUS,
+// REGISTRY (string form missing, the registry use resolves), plus the module/export of every registry use.
+// Exit 2 when any build misses a patch or a registry use does not resolve.
 // ============================================================================
 'use strict';
 const fs = require('fs');
@@ -70,6 +71,7 @@ for (const t of targets) {
       n[r.status] = (n[r.status] || 0) + 1;
       const crit = r.critical ? ', CRITICAL' : '';
       if (r.status === 'applied') console.log('[OK]   ', r.id, '(variant ' + r.variant + crit + ')');
+      else if (r.status === 'registry') console.log('[R]    ', r.id, '(no string variant; left to the registry' + crit + ')');
       else if (r.status === 'already') console.log('[=]    ', r.id, '(already patched' + crit + ')');
       else if (r.status === 'wildcard') {
         console.log('[WILD] ', r.id, '(variant ' + r.variant + ': ' + Object.entries(r.map).filter(([a, c]) => a !== c).map(([a, c]) => a + '->' + c).join(' ') + crit + ')');
@@ -78,6 +80,15 @@ for (const t of targets) {
       if (r.status === 'missing') bad++;
     }
     if (res.error) { console.log('[X] ' + res.error); bad++; }
+    // registry uses: module (by export names, hinted ids) and export of every declared use
+    if (res.registryError) { console.log('[X] registry: ' + res.registryError); bad++; }
+    for (const r of res.results) {
+      if (!r.registry) continue;
+      const e = r.registry;
+      const where = e.use.map((u) => (u.wrap || u.get || u.frame || 'exports') + '@' + u.m + (u.wrap ? ' (' + u.mode + ' ' + u.hook + ')' : u.as ? ' -> ' + u.as : '')).join(', ');
+      if (e.errors.length) { console.log('[REG X]', r.id, e.errors.join('; ')); bad++; }
+      else console.log('[REG]  ', r.id, where + (e.full ? '' : ' (partial: the string patch still needs locals)'));
+    }
     console.log('Summary: ' + Object.entries(n).map(([k, v]) => k + '=' + v).join('  ') + '  / ' + res.results.length);
   }
 }

@@ -113,15 +113,89 @@ function wildcardAlready(s, v) {
   return p.locals.length > 0 && matchesUpTo2(p.re, s).length > 0;
 }
 
+// --- webpack registry ----------------------------------------------------------
+// Patches can also declare "registry" uses (patches.json): module exports the renderer reads or wraps
+// through the bundle's webpack registry (sandtogether.js, installRegistry). Modules are found by the
+// export names they define, with known ids as hints, because ids move between builds (FH: 46781 -> 13125).
+
+// Runs the bundle's webpack runtime in a vm only until it processes a chunk we queued, which hands
+// over __webpack_require__ before any game module is instantiated.
+function loadRegistry(src) {
+  const STOP = new Error('ST_STOP');
+  let req = null;
+  const g = { location: { href: 'file:///st/dist/index.html' } };
+  g.document = { currentScript: { tagName: 'SCRIPT', src: 'file:///st/dist/js/bundle.js' }, baseURI: 'file:///st/dist/', getElementsByTagName: () => [] };
+  g.self = g; g.window = g;
+  g.webpackChunksand_v1 = [[['st-probe'], {}, (r) => { req = r; throw STOP; }]];
+  try { vm.runInNewContext(src, g, { filename: 'bundle.js', timeout: 15000 }); } catch (e) { if (e !== STOP) return { error: 'webpack runtime: ' + e.message }; }
+  return req ? { req } : { error: 'webpack runtime not reached' };
+}
+
+// Export names a module factory defines: n.d(t,{name:()=>local,...}), sometimes in several calls.
+function factoryExports(f) {
+  const names = [], re = /\.d\([\w$]+,\{([^}]*)\}\)/g;
+  let m;
+  while ((m = re.exec(String(f)))) for (const p of m[1].split(',')) { const k = /^\s*["']?([\w$]+)["']?\s*:/.exec(p); if (k) names.push(k[1]); }
+  return names;
+}
+
+// Calls of the local behind an export inside its own module. An export wrapper doesn't see them,
+// so a wrapped export must have none (check-anchors reports it).
+function innerCalls(f, name) {
+  const s = String(f), m = new RegExp('[{,]\\s*' + esc(name) + ':\\(\\)=>([\\w$]+)[,}]').exec(s);
+  if (!m) return null;
+  return (s.match(new RegExp('(?<![\\w$.])(?<!function )' + esc(m[1]) + '\\(', 'g')) || []).length;
+}
+
+// Module id for one registry use: a hinted id that defines all named exports, else the only module that does.
+function resolveUse(req, u, cache) {
+  const need = [...u.exports, u.wrap || u.get || u.frame].filter(Boolean);
+  const has = (id) => {
+    if (!cache.has(id)) cache.set(id, typeof req.m[id] === 'function' ? factoryExports(req.m[id]) : []);
+    return need.every((e) => cache.get(id).includes(e));
+  };
+  for (const id of u.m || []) if (has(String(id))) return { id: Number(id) };
+  const hits = Object.keys(req.m).filter(has);
+  if (hits.length === 1) return { id: Number(hits[0]) };
+  return { error: hits.length ? 'ambiguous: modules ' + hits.slice(0, 4).join(',') : 'no module defines ' + need.join('+') };
+}
+
+// -> { entries: [{ id, full, use: [use + resolved m], errors: [] }] } or { error }
+function resolveRegistry(src, defs) {
+  const withReg = (defs.bundle || []).filter((p) => p.registry && Array.isArray(p.registry.use));
+  if (!withReg.length) return { entries: [] };
+  const L = loadRegistry(src);
+  if (L.error) return { error: L.error, entries: [] };
+  const cache = new Map();
+  return {
+    entries: withReg.map((p) => {
+      const use = [], errors = [];
+      for (const u of p.registry.use) {
+        const r = resolveUse(L.req, u, cache);
+        if (r.error) errors.push((u.wrap || u.get || u.frame || u.as) + ': ' + r.error);
+        else {
+          use.push(Object.assign({}, u, { m: r.id }));
+          const n = u.wrap ? innerCalls(L.req.m[r.id], u.wrap) : 0;
+          if (n) errors.push(u.wrap + ': called ' + n + 'x inside module ' + r.id + ', an export wrapper would miss those calls');
+        }
+      }
+      return { id: p.id || p.name, full: !!p.registry.full, use, errors };
+    }),
+  };
+}
+
 // --- engine ------------------------------------------------------------------
 const countUpTo2 = (s, needle) => { const i = s.indexOf(needle); return i < 0 ? 0 : (s.indexOf(needle, i + 1) < 0 ? 1 : 2); };
 const parseError = (src) => { try { new vm.Script(src, { filename: 'bundle.js' }); return null; } catch (e) { return e.message; } };
 
 // Applies defs.bundle to the bundle text. Per patch: first variant whose literal anchor is unique
 // (also with the FH alias rewritten), then, if allowed, the newest variant with wildcards.
-// result.status: applied | already | wildcard | missing.
+// A patch whose string form is missing but whose registry use fully resolves is left to the renderer.
+// result.status: applied | already | wildcard | registry | missing.
+// opts: wildcard (default true), skip (patch ids left to the registry, for testing), registry (default true)
 function applyBundle(src, defs, opts) {
   const wildcard = !opts || opts.wildcard !== false;
+  const skip = (opts && opts.skip) || [];
   // a bundle patched by this engine before (no pristine copy): its manifest says which hooks were adapted
   let prevWild = [];
   if (src.startsWith(MANIFEST_TAG)) try { prevWild = JSON.parse(/_hooks=(\{.*\})\);$/.exec(src.slice(0, src.indexOf('\n')))[1]).wild || []; } catch (e) { /* unreadable: treat as none */ }
@@ -133,6 +207,7 @@ function applyBundle(src, defs, opts) {
     const r = { id: pt.id || pt.name, name: pt.name, critical: !!pt.critical, status: 'missing' };
     results.push(r);
     const vs = pt.variants || [];
+    if (skip.includes(r.id)) { r.reason = 'skipped'; continue; }
     for (let vi = 0; vi < vs.length && r.status === 'missing'; vi++) {
       const v = vs[vi];
       const pairs = fhAlias && fhAlias !== 'ie' ? [[v.anchor, v.patched], [adapt(v.anchor), adapt(v.patched)]] : [[v.anchor, v.patched]];
@@ -158,11 +233,21 @@ function applyBundle(src, defs, opts) {
   let error = null;
   if (s !== src && parseError(s) && !parseError(src)) {
     if (wildcard && results.some((r) => r.status === 'wildcard')) {
-      const again = applyBundle(src, defs, { wildcard: false });
+      const again = applyBundle(src, defs, Object.assign({}, opts, { wildcard: false }));
       again.wildcardDropped = true;
       return again;
     }
     error = 'patched bundle does not parse: ' + parseError(s);
+  }
+  // registry uses are resolved on the unpatched text: a patch may split a module's export list
+  const reg = opts && opts.registry === false ? { entries: [] } : resolveRegistry(src.startsWith(MANIFEST_TAG) ? src.slice(src.indexOf('\n') + 1) : src, defs);
+  const regUse = [];
+  for (const e of reg.entries) {
+    const r = results.find((x) => x.id === e.id);
+    r.registry = e;
+    if (e.full ? e.errors.length : !e.use.length) continue;
+    if (r.status === 'missing' && e.full) r.status = 'registry';
+    regUse.push({ id: e.id, s: r.status !== 'missing' && r.status !== 'registry', full: e.full, use: e.use });
   }
   const by = (f) => results.filter(f).map((r) => r.id);
   const manifest = {
@@ -170,10 +255,11 @@ function applyBundle(src, defs, opts) {
     ok: by((r) => r.status === 'applied' || (r.status === 'already' && !r.adapted)),
     wild: by((r) => r.status === 'wildcard' || r.adapted),
     miss: by((r) => r.status === 'missing'),
+    reg: regUse,
   };
   const text = error ? null : MANIFEST_TAG + 'window.SandTogether&&(window.SandTogether._hooks=' + JSON.stringify(manifest) + ');\n' + s;
   return {
-    text, error, results, fhAlias, manifest,
+    text, error, results, fhAlias, manifest, registryError: reg.error || null,
     criticalFail: results.some((r) => r.critical && r.status === 'missing'),
     featureMiss: results.filter((r) => !r.critical && r.status === 'missing').length,
   };
@@ -197,4 +283,4 @@ function patchBundleFile(bundlePath, defs, opts) {
   return res;
 }
 
-module.exports = { applyBundle, patchBundleFile, restorePristine, detectFhAlias, adaptVariant, tokens, toPattern, wildcardPlan, MANIFEST_TAG };
+module.exports = { applyBundle, patchBundleFile, restorePristine, detectFhAlias, adaptVariant, tokens, toPattern, wildcardPlan, loadRegistry, factoryExports, innerCalls, resolveRegistry, MANIFEST_TAG };

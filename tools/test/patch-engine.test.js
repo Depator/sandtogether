@@ -117,7 +117,7 @@ test('manifest: first line lists applied, adapted and missing hooks', () => {
   ] };
   const r = run('Aaa();Bbb(y);', d);
   assert.ok(r.text.startsWith(engine.MANIFEST_TAG + 'window.SandTogether&&(window.SandTogether._hooks='));
-  assert.deepStrictEqual(r.manifest, { v: 1, ok: ['a'], wild: ['b'], miss: ['c'] });
+  assert.deepStrictEqual(r.manifest, { v: 1, ok: ['a'], wild: ['b'], miss: ['c'], reg: [] });
   assert.strictEqual(r.criticalFail, true);
   const w = { SandTogether: {} };
   new Function('window', r.text.split('\n')[0])(w);
@@ -139,6 +139,26 @@ test('patchBundleFile keeps a pristine copy and re-patches from it', () => {
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('registry: export names of a factory, also when a patch split its export list', () => {
+  const f = 'function(e,t,n){"use strict";n.r(t),n.d(t,{Aa:()=>r,"b$":()=>o.x,});window.X=t;n.d(t,{Cc:()=>s})}';
+  assert.deepStrictEqual(engine.factoryExports(f), ['Aa', 'b$', 'Cc']);
+});
+
+test('registry: calls of an exported local inside its own module are counted', () => {
+  assert.strictEqual(engine.innerCalls('n.d(t,{DN:()=>T});const T=(e)=>e;', 'DN'), 0);
+  assert.strictEqual(engine.innerCalls('n.d(t,{Lu:()=>m});function m(e){}function q(){m(1);x.m(2)}', 'Lu'), 1);
+  assert.strictEqual(engine.innerCalls('n.d(t,{Lu:()=>m});', 'Zz'), null);
+});
+
+test('registry: a bundle without a webpack runtime only loses the registry', () => {
+  const d = { bundle: [{ id: 'a', name: 'a', critical: true, registry: { full: true, use: [{ exports: ['X'], wrap: 'X', hook: '_a', mode: 'skip' }] }, variants: [{ anchor: 'Aaa()', patched: 'Aaa(),1' }] }] };
+  const r = run('Aaa();', d, { skip: ['a'] });
+  assert.match(r.registryError, /webpack runtime/);
+  assert.strictEqual(r.results[0].status, 'missing');
+  assert.strictEqual(r.criticalFail, true);
+  assert.deepStrictEqual(r.manifest.reg, []);
+});
+
 const builds = process.env.ST_GAME_VERSIONS;
 test('stored game builds: every patch applies literally and the result parses', { skip: !builds && 'set ST_GAME_VERSIONS' }, () => {
   const real = JSON.parse(fs.readFileSync(path.join(__dirname, '../../src/patches.json'), 'utf8'));
@@ -148,5 +168,22 @@ test('stored game builds: every patch applies literally and the result parses', 
     const r = engine.applyBundle(fs.readFileSync(p, 'utf8'), real, { wildcard: false });
     assert.deepStrictEqual(r.results.filter((x) => x.status !== 'applied').map((x) => x.id), [], v);
     assert.strictEqual(r.error, null, v);
+    // every registry use resolves to a module that defines the export, with no inner calls for wraps
+    assert.strictEqual(r.registryError, null, v);
+    assert.deepStrictEqual(r.results.filter((x) => x.registry && x.registry.errors.length).map((x) => x.id + ': ' + x.registry.errors), [], v);
+    assert.strictEqual(r.manifest.reg.length, real.bundle.filter((x) => x.registry).length, v);
+  }
+});
+
+test('stored game builds: string patches left out are taken over by the registry', { skip: !builds && 'set ST_GAME_VERSIONS' }, () => {
+  const real = JSON.parse(fs.readFileSync(path.join(__dirname, '../../src/patches.json'), 'utf8'));
+  const full = real.bundle.filter((x) => x.registry && x.registry.full).map((x) => x.id);
+  for (const v of fs.readdirSync(builds)) {
+    const p = path.join(builds, v, 'app/dist/js/bundle.js');
+    if (!fs.existsSync(p)) continue;
+    const r = engine.applyBundle(fs.readFileSync(p, 'utf8'), real, { wildcard: false, skip: full });
+    assert.deepStrictEqual(r.results.filter((x) => full.includes(x.id)).map((x) => x.status), full.map(() => 'registry'), v);
+    assert.strictEqual(r.criticalFail, false, v); // the frame hook is critical, the registry covers it
+    assert.ok(r.manifest.reg.filter((x) => full.includes(x.id)).every((x) => x.s === false), v);
   }
 });

@@ -752,7 +752,7 @@
 	document.addEventListener("DOMContentLoaded", () => {
 		const h = ST._hooks;
 		if (!h) log("hooks: unknown (bundle patched by an older installer)");
-		else log("hooks: " + h.ok.length + " applied, " + (h.wild || []).length + " auto-adapted" + ((h.wild || []).length ? " [" + h.wild.join(",") + "]" : "") + ", missing: " + ((h.miss || []).join(",") || "none"));
+		else log("hooks: " + h.ok.length + " applied, " + (h.wild || []).length + " auto-adapted" + ((h.wild || []).length ? " [" + h.wild.join(",") + "]" : "") + ", missing: " + ((h.miss || []).join(",") || "none") + ", via registry: " + ((h.rt || []).join(",") || "none") + ((h.rtErr || []).length ? ", registry errors: " + h.rtErr.join("; ") : ""));
 	});
 	// 0.9.161: the renderer's EXCEPTION RECORDER — every uncaught error and rejected promise ends up
 	// in the log file (the first 20). Without this a "static screen" left no trace at all.
@@ -777,7 +777,7 @@
 	// A peer that sent no PROTO_VER (older mod) is compatible only on the exact same release.
 	function sameProto(pp) { return !!pp && (pp.proto != null ? pp.proto === PROTO_VER : pp.modVer === VER); }
 	// Hooks the installer applied (first line of the patched bundle, see st-patch-engine.js); null = unknown.
-	function hookList() { const h = ST._hooks; return h && Array.isArray(h.ok) ? h.ok.concat(h.wild || []) : null; }
+	function hookList() { const h = ST._hooks; return h && Array.isArray(h.ok) ? [...new Set(h.ok.concat(h.wild || [], h.rt || []))] : null; }
 	function mverMsg(reply) { const m = { t: "mver", v: VER, pv: PROTO_VER, gf: ST._gameFp || null, hk: hookList() }; if (reply) m.r = 1; return m; }
 	// patches.json ids each synced action needs, per side. Without them the action was silently dead.
 	const HOOK_FEATURES = {
@@ -810,6 +810,77 @@
 		ST._featOff = off;
 	}
 	const featOn = (f) => !(ST._featOff && ST._featOff[f]);
+
+	// ------------------------------------------------------------------
+	// Webpack registry hooks ("registry" in patches.json; the installer resolves the module ids into
+	// SandTogether._hooks.reg). The bundle's runtime processes the chunk queued below before any game
+	// module runs and hands over __webpack_require__, so module factories can be wrapped in time.
+	// Value leaks are always taken from the exports. Function hooks and the frame hook only stand in
+	// for a string patch that did not apply: a string patch inside the function also sees calls from
+	// its own module, an export wrapper does not.
+	// ------------------------------------------------------------------
+	const REG_MODES = {
+		skip: (fn, hook) => function () { const h = ST[hook]; if (h && h.apply(ST, arguments)) return; return fn.apply(this, arguments); },
+		pre: (fn, hook) => function () { const h = ST[hook]; if (h) h.apply(ST, arguments); return fn.apply(this, arguments); },
+		flag: (fn, flag) => function () { ST[flag] = 1; try { return fn.apply(this, arguments); } finally { ST[flag] = 0; } },
+	};
+	// export getter that hands out one wrapper per value of the live binding (__stOrig: the game's function)
+	function regGetter(get, make) { let v0, w0; return () => { const v = get(); if (v !== v0) { v0 = v; w0 = typeof v === "function" ? Object.assign(make(v), { __stOrig: v }) : v; } return w0; }; }
+	function installRegistry(req) {
+		const h = ST._hooks, reg = h && Array.isArray(h.reg) ? h.reg : [];
+		if (!reg.length || !req || !req.m || typeof req.d !== "function") return;
+		h.rt = []; h.rtErr = [];
+		const plans = new Map(); // module id -> { wraps: Map(export -> {make, done}), after: [fn(exports)] }
+		const plan = (id) => { if (!plans.has(id)) plans.set(id, { wraps: new Map(), after: [] }); return plans.get(id); };
+		for (const r of reg) {
+			let left = 0;
+			const done = () => { if (--left === 0 && r.full && h.rt.indexOf(r.id) < 0) h.rt.push(r.id); };
+			for (const u of r.use || []) {
+				if ((u.wrap || u.frame) && r.s) continue; // the string patch is in place
+				if (u.wrap && !REG_MODES[u.mode]) { h.rtErr.push(r.id + ": mode " + u.mode); continue; }
+				left++;
+				const p = plan(u.m);
+				if (u.wrap) p.wraps.set(u.wrap, { make: (fn) => REG_MODES[u.mode](fn, u.hook), done });
+				else if (u.frame) p.after.push((ex) => {
+					const FH = ex[u.frame], ev = FH && FH.events, emit = ev && ev.emit;
+					if (typeof emit !== "function") throw new Error("no " + u.frame + ".events.emit");
+					ev.emit = function (state, name) { if (name === "frame:update" && ST._frame) ST._frame(state, FH); return emit.apply(this, arguments); };
+					if (ev.emit === emit) throw new Error(u.frame + ".events.emit is read-only");
+					done();
+				});
+				else p.after.push((ex) => { ST[u.as] = u.get ? ex[u.get] : ex; if (ST[u.as] != null) done(); });
+			}
+		}
+		const wrapping = new Map(); // exports object of a module being instantiated -> its wraps
+		const d0 = req.d;
+		req.d = function (ex, defs) {
+			const w = wrapping.get(ex);
+			if (w) {
+				defs = Object.assign({}, defs);
+				for (const [name, x] of w) if (typeof defs[name] === "function") { defs[name] = regGetter(defs[name], x.make); x.hit = true; x.done(); }
+			}
+			return d0.call(this, ex, defs);
+		};
+		for (const [id, p] of plans) {
+			const f = req.m[id];
+			if (typeof f !== "function") { h.rtErr.push("module " + id + " missing"); continue; }
+			req.m[id] = function (module, exports) {
+				if (p.wraps.size) wrapping.set(exports, p.wraps);
+				try { return f.apply(this, arguments); }
+				finally {
+					wrapping.delete(exports);
+					for (const [name, x] of p.wraps) if (!x.hit) h.rtErr.push("module " + id + ": no export " + name);
+					for (const a of p.after) { try { a(module.exports); } catch (e) { h.rtErr.push("module " + id + ": " + e.message); } }
+				}
+			};
+		}
+	}
+	try {
+		(self.webpackChunksand_v1 = self.webpackChunksand_v1 || []).push([["sandtogether"], {}, (req) => {
+			ST._wpReq = req; // __webpack_require__, for diagnostics (devtools: SandTogether._wpReq(15585))
+			try { installRegistry(req); } catch (e) { log("registry hooks failed:", e.message); }
+		}]);
+	} catch (e) { log("registry queue failed:", e.message); }
 
 	// ------------------------------------------------------------------
 	// Tools

@@ -452,7 +452,8 @@ function applyBundlePatches(bundlePath, patches, srcDir) {
   let engine;
   try { engine = require(path.join(srcDir, 'st-patch-engine.js')); } catch (e) { engine = require('./st-patch-engine.js'); }
   const res = engine.patchBundleFile(bundlePath, patches, { wildcard: process.env.ST_NO_WILDCARD !== '1' });
-  for (const r of res.results) if (r.status === 'wildcard' || r.status === 'missing') log('AUTO-UPDATE: hook ' + r.status + ': ' + r.name + (r.reason ? ' (' + r.reason + ')' : ''));
+  for (const r of res.results) if (r.status === 'wildcard' || r.status === 'missing' || r.status === 'registry') log('AUTO-UPDATE: hook ' + r.status + ': ' + r.name + (r.reason ? ' (' + r.reason + ')' : ''));
+  if (res.registryError) log('AUTO-UPDATE: webpack registry not readable: ' + res.registryError);
   if (res.error) log('AUTO-UPDATE: ' + res.error + ' - bundle.js left unpatched');
   return { criticalFail: res.criticalFail || !!res.error, appliedN: res.results.filter((r) => r.status === 'applied' || r.status === 'wildcard').length };
 }
