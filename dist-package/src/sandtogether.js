@@ -91,7 +91,7 @@
 			direct_no_upnp: "Port not opened automatically — forward TCP {0} on your router, then share the address",
 			bridge_old: "Mod bridge outdated — restart the game (auto-update) or re-run the installer / patch.js",
 			direct_addr: "Your address", direct_show: "show", direct_hide: "hide", direct_copied: "Address copied!",
-			direct_hidden_hint: "hidden on purpose — safe to stream",
+			direct_hidden_hint: "hidden on purpose — safe to stream", lan_addr_ph: "ip:port/code",
 			lb_steps: "1) Invite friends   2) Hit PLAY — they will join your map automatically",
 			badge_offline: "○ OFFLINE — not connected",
 			badge_host: (tr) => "● HOSTING (" + tr + ")",
@@ -157,7 +157,7 @@
 			direct_no_upnp: "Port nie otworzył się sam — przekieruj TCP {0} na routerze, potem podaj adres",
 			bridge_old: "Mostek moda nieaktualny — zrestartuj grę (auto-update) albo uruchom ponownie instalator / patch.js",
 			direct_addr: "Twój adres", direct_show: "pokaż", direct_hide: "ukryj", direct_copied: "Adres skopiowany!",
-			direct_hidden_hint: "celowo ukryty — bezpieczne na streamie",
+			direct_hidden_hint: "celowo ukryty — bezpieczne na streamie", lan_addr_ph: "ip:port/kod",
 			lb_steps: "1) Zaproś znajomych   2) Wciśnij GRAJ — dołączą na Twoją mapę automatycznie",
 			badge_offline: "○ OFFLINE — nie połączono",
 			badge_host: (tr) => "● HOSTUJESZ (" + tr + ")",
@@ -223,7 +223,7 @@
 			direct_no_upnp: "端口未自动开放 — 请在路由器上转发 TCP {0},然后分享地址",
 			bridge_old: "模组桥接已过期 — 请重启游戏(自动更新)或重新运行安装程序 / patch.js",
 			direct_addr: "你的地址", direct_show: "显示", direct_hide: "隐藏", direct_copied: "地址已复制!",
-			direct_hidden_hint: "已刻意隐藏 — 直播安全",
+			direct_hidden_hint: "已刻意隐藏 — 直播安全", lan_addr_ph: "ip:端口/代码",
 			lb_steps: "1) 邀请朋友   2) 点击开始游戏——他们会自动加入你的地图",
 			badge_offline: "○ 离线——未连接",
 			badge_host: (tr) => "● 正在创建房间(" + tr + ")",
@@ -943,8 +943,11 @@
 	function rememberJoin(r) {
 		if (!r) return;
 		ST._joinCode = r.code || null; ST._lanAddr = r.lanIp || null; ST._directPort = r.port || 27777;
+		ST._lanAddrs = Array.isArray(r.lanIps) && r.lanIps.length ? r.lanIps : (r.lanIp ? [{ ip: r.lanIp }] : []);
 	}
 	const joinAddr = (ip) => (ip || "?") + ":" + (ST._directPort || 27777) + (ST._joinCode ? "/" + ST._joinCode : "");
+	// all of this PC's join addresses (LAN, Tailscale, ...) for the status line
+	const lanAddrsText = () => (ST._lanAddrs && ST._lanAddrs.length ? ST._lanAddrs.map((a) => joinAddr(a.ip)).join(" | ") : joinAddr(ST._lanAddr));
 	// "ip", "ip:port" or "ip:port/code"
 	function splitJoinAddr(text) {
 		let h = String(text || "").trim(), port = null, code = null;
@@ -962,7 +965,7 @@
 			if (ev.kind === "hosting") {
 				ST.net.role = "host"; ST.net.transport = ev.transport;
 				if (ev.transport === "steam") { ST._joinCode = null; ST._lanAddr = null; ST._directAddr = null; }
-				setStatus(ev.transport === "steam" ? t("hosting_steam") : (ST._directMode ? t("direct_ready") : t("hosting_lan", ev.port) + (ST._joinCode ? " — " + joinAddr(ST._lanAddr) : "")));
+				setStatus(ev.transport === "steam" ? t("hosting_steam") : (ST._directMode ? t("direct_ready") : t("hosting_lan", ev.port) + (ST._joinCode ? " — " + lanAddrsText() : "")));
 				ST.net.lobbyId = ev.lobbyId || null; ST._autoSentWid = null; // reset auto-send; remember lobbyId
 				resetWorldQueue(); // new host session starts clean, peer-connected re-queues the full world
 					updateLobbyIdDisplay();
@@ -7231,12 +7234,10 @@
 			'<button id="st-join-id">' + t("btn_join_id") + "</button>" +
 			// A row with an IP field for Join LAN — Electron/Chromium does NOT support window.prompt(),
 			// so the address is entered here, in the panel (not via a browser dialog).
-			// separate IP and PORT fields (QoL — TCentraL)
+			// one field for the host's full address "ip:port/code" (the port is optional, 27777 by default)
 			'<div id="st-lan-row" style="display:none;margin-top:4px">' +
-			'<input id="st-lan-addr" placeholder="IP" value="127.0.0.1" spellcheck="false" ' +
-			'style="width:104px;background:#111;color:#ddd;border:1px solid #555;border-radius:3px;font:11px monospace;padding:2px 4px">' +
-			'<input id="st-lan-port" placeholder="port" value="27777" spellcheck="false" maxlength="5" ' +
-			'style="width:44px;margin-left:2px;background:#111;color:#ddd;border:1px solid #555;border-radius:3px;font:11px monospace;padding:2px 4px"> ' +
+			'<input id="st-lan-addr" placeholder="' + t("lan_addr_ph") + '" value="" spellcheck="false" ' +
+			'style="width:150px;background:#111;color:#ddd;border:1px solid #555;border-radius:3px;font:11px monospace;padding:2px 4px"> ' +
 			'<button id="st-lan-go">' + t("btn_connect") + "</button>" +
 			"</div>" +
 			// team chat (the host relays between clients)
@@ -7273,30 +7274,24 @@
 			const r = await net.hostWs(27777);
 			if (!r.ok) { setStatus(t("error", r.error), "#f66"); return; }
 			ST._directMode = false; ST._directAddr = null; rememberJoin(r);
-			setStatus(t("hosting_lan", r.port || 27777) + " — " + joinAddr(ST._lanAddr));
+			setStatus(t("hosting_lan", r.port || 27777) + " — " + lanAddrsText());
 		};
-		// Join LAN: separate IP and PORT fields (QoL — TCentraL); window.prompt doesn't work in Electron
+		// Join LAN: one address field; window.prompt doesn't work in Electron
 		const lanRow = hud.querySelector("#st-lan-row");
 		const lanInput = hud.querySelector("#st-lan-addr");
-		const lanPort = hud.querySelector("#st-lan-port");
 		async function doJoinLan() {
-			// convenience: pasting "ip:port/code" into the IP field splits itself automatically
-			const a = splitJoinAddr(lanInput.value), pf = splitJoinAddr("x:" + (lanPort.value || ""));
-			const h = a.h, code = a.code || pf.code;
-			let p = a.port || pf.port || "";
-			if (a.port) lanPort.value = p;
-			if (a.port || a.code) lanInput.value = h + (code ? "/" + code : "");
-			if (!h) { lanInput.focus(); return; }
-			const port = parseInt(p || "27777", 10);
-			if (!(port > 0 && port < 65536)) { setStatus(t("error", "port?"), "#f66"); lanPort.focus(); lanPort.select(); return; }
+			const a = splitJoinAddr(lanInput.value);
+			if (!a.h) { lanInput.focus(); return; }
+			const port = parseInt(a.port || "27777", 10);
+			if (!(port > 0 && port < 65536)) { setStatus(t("error", "port?"), "#f66"); lanInput.focus(); return; }
 			setStatus(t("creating_lobby"));
-			const r = await net.joinWs(h, port, code);
+			const r = await net.joinWs(a.h, port, a.code);
 			if (!r.ok) setStatus(t("error", r.error), "#f66");
-			else { lanRow.style.display = "none"; lanInput.blur(); lanPort.blur(); } // hand the keyboard back to the game
+			else { lanRow.style.display = "none"; lanInput.blur(); } // hand the keyboard back to the game
 		}
 		// Keys typed into the fields must not reach the game (the game's keyup does NOT filter INPUT elements;
 		// they bubble up to window — stopPropagation on the inputs cuts off this whole class of problem)
-		for (const el2 of [lanInput, lanPort]) {
+		for (const el2 of [lanInput]) {
 			el2.addEventListener("keydown", (e) => { e.stopPropagation(); if (e.key === "Enter") { e.preventDefault(); doJoinLan(); } });
 			el2.addEventListener("keyup", (e) => e.stopPropagation());
 		}
@@ -7778,28 +7773,23 @@
 				const bJoin = lbBtn(t("btn_join_lan"), t("lb_join_lan_d"), false);
 				const row = document.createElement("div");
 				row.style.cssText = "display:none;margin:2px 0 6px;padding:0 2px";
-				const ip = lbInput("IP", "127.0.0.1", 170);
-				const port = lbInput("port", "27777", 62); port.maxLength = 5;
+				const ip = lbInput(t("lan_addr_ph"), "", 240);
 				const go = document.createElement("button");
 				go.textContent = t("btn_connect");
 				go.style.cssText = "margin-left:6px;background:#1d4a6b;color:#fff;border:1px solid rgba(255,255,255,.2);border-radius:3px;font:600 13px inherit;cursor:pointer;padding:5px 12px";
 				const doJoin = async () => {
-					const a = splitJoinAddr(ip.value), pf = splitJoinAddr("x:" + (port.value || ""));
-					const h = a.h, code = a.code || pf.code;
-					const pr = a.port || pf.port || "";
-					if (a.port) port.value = pr;
-					if (a.port || a.code) ip.value = h + (code ? "/" + code : "");
-					if (!h) { ip.focus(); return; }
-					const pn = parseInt(pr || "27777", 10);
-					if (!(pn > 0 && pn < 65536)) { port.focus(); port.select(); return; }
+					const a = splitJoinAddr(ip.value);
+					if (!a.h) { ip.focus(); return; }
+					const pn = parseInt(a.port || "27777", 10);
+					if (!(pn > 0 && pn < 65536)) { ip.focus(); return; }
 					setStatus(t("creating_lobby"));
-					const r = await net.joinWs(h, pn, code);
+					const r = await net.joinWs(a.h, pn, a.code);
 					if (!r.ok) setStatus(t("error", r.error), "#f66");
 					renderLobby(true);
 				};
-				for (const el of [ip, port]) el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doJoin(); } });
+				ip.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doJoin(); } });
 				go.onclick = doJoin;
-				row.appendChild(ip); row.appendChild(port); row.appendChild(go);
+				row.appendChild(ip); row.appendChild(go);
 				bJoin.onclick = () => { row.style.display = row.style.display === "none" ? "block" : "none"; if (row.style.display === "block") { ip.focus(); ip.select(); } };
 				p.appendChild(bJoin); p.appendChild(row);
 				const bId = lbBtn(t("btn_join_id"), t("lb_join_id_d"), false);
@@ -7844,28 +7834,39 @@
 					};
 					p.appendChild(idRow);
 				}
-				// direct host address — MASKED BY DEFAULT (stream-safe), copyable without revealing it
+				// host address — MASKED BY DEFAULT (stream-safe), copyable without revealing it.
+				// Direct: the public address; LAN: one line per local/VPN address of this PC (LAN, Tailscale, ...)
 				if (ST.net.role === "host" && ST.net.transport === "ws" && (ST._directAddr || ST._lanAddr)) {
-					const addr = () => joinAddr(ST._directAddr || ST._lanAddr);
+					const list = ST._directAddr ? [{ ip: ST._directAddr }] : (ST._lanAddrs && ST._lanAddrs.length ? ST._lanAddrs : [{ ip: ST._lanAddr }]);
 					const row = document.createElement("div");
-					row.style.cssText = "margin:6px 0 8px;font-size:13px;color:#9f9;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+					row.style.cssText = "margin:6px 0 4px;font-size:13px;color:#9f9;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
 					const lbl = document.createElement("span"); lbl.style.color = "#9fb6c9"; lbl.textContent = t("direct_addr") + ":";
-					const val = document.createElement("span");
-					val.style.cssText = "font:13px monospace;color:#9f9";
-					const paint = () => { val.textContent = ST._directShown ? addr() : ("●●●.●●●.●●●.●●●:" + ST._directPort + (ST._joinCode ? "/●●●●●●" : "")); };
-					paint();
+					const vals = [];
+					const paint = () => { for (const v of vals) v.el.textContent = ST._directShown ? joinAddr(v.ip) : ("●●●.●●●.●●●.●●●:" + ST._directPort + (ST._joinCode ? "/●●●●●●" : "")); };
 					const eye = document.createElement("span");
 					eye.style.cssText = "cursor:pointer;font-size:11px;color:#6cf;text-decoration:underline";
 					eye.textContent = ST._directShown ? t("direct_hide") : t("direct_show");
 					eye.onclick = () => { ST._directShown = !ST._directShown; paint(); eye.textContent = ST._directShown ? t("direct_hide") : t("direct_show"); };
-					const cp = document.createElement("span");
-					cp.style.cssText = "cursor:pointer;font-size:11px;color:#6cf;text-decoration:underline";
-					cp.textContent = "📋 " + t("lb_copy");
-					cp.onclick = async () => { try { await navigator.clipboard.writeText(addr()); cp.textContent = t("direct_copied"); setTimeout(() => { cp.textContent = "📋 " + t("lb_copy"); }, 1200); } catch (e) {} };
 					const hint = document.createElement("span");
 					hint.style.cssText = "font-size:10px;color:#7d95a8"; hint.textContent = t("direct_hidden_hint");
-					row.appendChild(lbl); row.appendChild(val); row.appendChild(eye); row.appendChild(cp); row.appendChild(hint);
+					row.appendChild(lbl); row.appendChild(eye); row.appendChild(hint);
 					p.appendChild(row);
+					for (const a of list) {
+						const line = document.createElement("div");
+						line.style.cssText = "margin:0 0 4px 10px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap";
+						if (a.name && list.length > 1) { const nm = document.createElement("span"); nm.style.cssText = "font-size:11px;color:#9fb6c9"; nm.textContent = a.name; line.appendChild(nm); }
+						const val = document.createElement("span");
+						val.style.cssText = "font:13px monospace;color:#9f9";
+						vals.push({ el: val, ip: a.ip });
+						const cp = document.createElement("span");
+						cp.style.cssText = "cursor:pointer;font-size:11px;color:#6cf;text-decoration:underline";
+						cp.textContent = "📋 " + t("lb_copy");
+						cp.onclick = async () => { try { await navigator.clipboard.writeText(joinAddr(a.ip)); cp.textContent = t("direct_copied"); setTimeout(() => { cp.textContent = "📋 " + t("lb_copy"); }, 1200); } catch (e) {} };
+						line.appendChild(val); line.appendChild(cp);
+						p.appendChild(line);
+					}
+					paint();
+					p.lastChild.style.marginBottom = "8px";
 				}
 				const plH = document.createElement("div");
 				plH.style.cssText = "font-weight:700;font-size:14px;color:#fff;margin-top:6px"; plH.textContent = t("lb_players");

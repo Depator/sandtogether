@@ -142,7 +142,7 @@ function noteAuthFail(ip) {
   if (!f || now - f.t > 60000) authFails.set(ip, { n: 1, t: now });
   else f.n++;
 }
-const joinInfo = () => ({ port: S.wsPort, code: S.joinCode, lanIp: localIPv4() });
+const joinInfo = () => ({ port: S.wsPort, code: S.joinCode, lanIp: localIPv4(), lanIps: localIPv4s() });
 
 function startWsServer(port, opts) {
   stopNetworking('restart');
@@ -244,8 +244,8 @@ function joinWs(host, port, code, _retry) {
     netSend({ t: 'hello', nick: S.myNick, ver: PROTO_VER });
   });
   sock.on('close', () => {
-    S.peers.delete('host');
-    emitEvent('peer-disconnected', { id: 'host' });
+    // only a host we were connected to can "leave"; a refused or failed attempt already reported its error
+    if (S.peers.delete('host')) emitEvent('peer-disconnected', { id: 'host' });
     // AUTO-RECONNECT (LAN): we revive a dropped connection every 3s. The attempt counter is carried via the _retry parameter
     // (it survives across sockets!). A successful handshake = stable connection → a future drop again gets 5 attempts.
     // A user Stop / another connection in the meantime interrupts it (role/transport/peers check).
@@ -620,6 +620,18 @@ function localIPv4() {
   // preferuj adresy prywatne (192.168/10./172.16-31)
   const priv = cands.filter((ip) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip));
   return priv[0] || cands[0] || null;
+}
+// every address a joiner might use (LAN, Tailscale/VPN, ...), private ones first; host-only virtual adapters skipped
+function localIPv4s() {
+  const ifs = os.networkInterfaces();
+  const all = [];
+  for (const name of Object.keys(ifs)) for (const a of ifs[name] || []) {
+    if ((a.family !== "IPv4" && a.family !== 4) || a.internal || /^169\.254\./.test(a.address)) continue;
+    all.push({ ip: a.address, name: String(name).slice(0, 24), virt: /^(vEthernet|VirtualBox|VMware)|docker|^br-|virbr|^veth|wsl/i.test(name) });
+  }
+  const real = all.filter((a) => !a.virt);
+  const rank = (ip) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip) ? 0 : /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) ? 1 : 2;
+  return (real.length ? real : all).sort((a, b) => rank(a.ip) - rank(b.ip)).map((a) => ({ ip: a.ip, name: a.name }));
 }
 
 // 1) SSDP: znajdz bramke internetowa (router) w sieci lokalnej
