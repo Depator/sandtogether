@@ -993,6 +993,21 @@
 					"patched": "case N.$V.Delete:return{down:e=>{if(window.SandTogether&&window.SandTogether._delSel&&window.SandTogether._delSel(e))return;let t=(0,J.oM)(e);"
 				}
 			]
+		},
+		{
+			"name": "world item sprite api (_wiApi)",
+			"critical": false,
+			"variants": [
+				{
+					"anchor": "T=(e,t)=>{(0,i.GA)(e,\"worldItems\",t.id),(0,o.s7)(e,t)},E=e=>{e.store.worldItems.forEach(t=>{C(e,t)})},",
+					"patched": "T=(e,t)=>{(0,i.GA)(e,\"worldItems\",t.id),(0,o.s7)(e,t)},E=e=>{e.store.worldItems.forEach(t=>{C(e,t)})},__stWi=(window.SandTogether&&(window.SandTogether._wiApi={make:C,drop:T}),0),",
+					"note": "game 0.6.0 (Update #5, 2026-10-21)"
+				},
+				{
+					"anchor": "y=(e,t)=>{(0,a.GA)(e,\"worldItems\",t.id),(0,o.s7)(e,t)},v=e=>{e.store.worldItems.forEach(t=>{(0,a.P9)(e,\"worldItems\",p[t.type],t.id,t.x,t.y)})},",
+					"patched": "y=(e,t)=>{(0,a.GA)(e,\"worldItems\",t.id),(0,o.s7)(e,t)},v=e=>{e.store.worldItems.forEach(t=>{(0,a.P9)(e,\"worldItems\",p[t.type],t.id,t.x,t.y)})},__stWi=(window.SandTogether&&(window.SandTogether._wiApi={make:(e,t)=>(0,a.P9)(e,\"worldItems\",p[t.type],t.id,t.x,t.y),drop:y}),0),"
+				}
+			]
 		}
 	],
 	"mainJs": {
